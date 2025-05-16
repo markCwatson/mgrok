@@ -1,0 +1,22 @@
+# Server configuration
+listen_addr: :7000
+tls:
+  cert_file: certs/server.crt
+  key_file: certs/server.key
+
+# Authentication and authorization
+auth:
+  type: token # token or mtls
+
+# Allowed clients and their permissions
+clients:
+  - token: 92c7e5801fb2be2a0a906938642f3eab
+    name: dev-laptop
+    allowed_ports:
+      - 6000-7000 # Range
+      - 8000 # Single port
+
+  - token: abcdef1234567890abcdef1234567890
+    name: prod-server
+    allowed_ports:
+      - 8000-9000

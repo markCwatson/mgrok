@@ -1,0 +1,15 @@
+server: tunnel.example.com:7000
+token: 92c7e5801fb2be2a0a906938642f3eab
+proxies:
+  ssh:
+    type: tcp
+    local_port: 22
+    remote_port: 6000
+  web:
+    type: tcp
+    local_port: 8080
+    remote_port: 8000
+  game:
+    type: udp
+    local_port: 7777
+    remote_port: 7777
