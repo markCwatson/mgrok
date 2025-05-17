@@ -1,133 +1,108 @@
 ## TCP/UDP tunneling in mgrok
 
-Below is a high-level "code-walkthrough" of how mgrok implements both TCP and UDP tunneling. It is broken down into four stages:
+Below is a high-level walkthrough of how mgrok implements both TCP and UDP tunneling. It is broken down into four stages:
 
-1. Control connection & messaging
-2. Proxy registration handshake (NewProxy / NewProxyResp)
+1. Control connection & multiplexing
+2. Proxy registration
 3. TCP proxy data path
-4. UDP proxy data path
+4. UDP proxy data path (future implementation)
 
 ---
 
-## 1. Control connection & messaging
+## 1. Control connection & multiplexing
 
-Both the client and the server share a single long-lived "control" connection over which JSON-encoded control messages are exchanged (NewProxy, StartWorkConn, UDPPacket, Ping, etc.). On top of that wire they multiplex messages concurrently.
+Both the client and the server share a single long-lived TCP connection (on port 9000 by default) over which all control messages and data are transmitted. This connection is multiplexed using the `xtaci/smux` library, allowing multiple logical streams to flow over a single physical connection.
 
-### Client side: setting up the dispatcher & transporter
+### Client side: establishing the session
 
-In the client's Control object, the client wraps the raw net.Conn (or encrypted wrapper) in a msg.Dispatcher and then builds a transport.MessageTransporter over it:
+The client establishes a TCP connection to the server and wraps it in a smux session:
 
 ```go
-// client/control.go
-...
-ctl.msgDispatcher = msg.NewDispatcher(sessionCtx.Conn) // or cryptoRW
-ctl.registerMsgHandlers()
-ctl.msgTransporter = transport.NewMessageTransporter( // <– multiplexing layer
-    ctl.msgDispatcher.SendChannel(),
-)
-...
+// cmd/client/main.go
+conn, err = net.Dial("tcp", config.Server)
+session, err = smux.Client(conn, nil)
 ```
 
-The msgDispatcher demultiplexes inbound JSON messages by type, and the MessageTransporter lets downstream code send control messages concurrently over the same connection.
-
-### Server side: registering handlers
-
-On the server the control loop registers handlers for the various messages (NewProxy, ReqWorkConn, Ping, etc.):
+The first stream opened is designated as the control stream, which will remain open for the entire session duration:
 
 ```go
-// server/control.go
-func (ctl *Control) registerMsgHandlers() {
-    ctl.msgDispatcher.RegisterHandler(&msg.NewProxy{}, ctl.handleNewProxy)
-    ctl.msgDispatcher.RegisterHandler(&msg.Ping{}, ctl.handlePing)
-    ctl.msgDispatcher.RegisterHandler(&msg.ReqWorkConn{}, msg.AsyncHandler(ctl.handleReqWorkConn))
-    ctl.msgDispatcher.RegisterHandler(&msg.NewProxyResp{}, ctl.handleNewProxyResp)
-    ...
-}
+ctrlStream, err = session.OpenStream()
+proxyHandler.RegisterProxies(ctrlStream)
+```
+
+### Server side: accepting connections
+
+The server listens for TCP connections and wraps accepted connections in smux sessions:
+
+```go
+// cmd/server/main.go
+conn, err = ln.Accept()
+session, err = smux.Server(conn, nil)
+```
+
+The first stream from each session is treated as the control stream:
+
+```go
+ctrlStream, err = session.AcceptStream()
+go controlHandler.HandleConnection(ctrlStream, session, clientID)
 ```
 
 ---
 
 ## 2. Proxy registration handshake
 
-Before any traffic is tunneled, the client tells the server "please open me a proxy" via a msg.NewProxy request; the server replies with msg.NewProxyResp containing either an error or the RemoteAddr to listen on.
+The client registers each proxy defined in its configuration by sending registration messages to the server over the control stream.
 
-### Client sends NewProxy
+### Message format
 
-The client's proxy-manager periodically checks each Proxy's state and, when it needs to start, emits a NewProxy payload via the event/transport layer:
-
-```go
-// client/proxy/proxy_wrapper.go
-var newProxyMsg msg.NewProxy
-pw.Cfg.MarshalToMsg(&newProxyMsg) // map the CLI/config into JSON fields
-_ = pw.handler(&event.StartProxyPayload{ // handler = MessageTransporter.Send
-    NewProxyMsg: &newProxyMsg,
-})
+```
+<Handshake> : 4 bytes "GRT1" + uint8 authMethod + authPayload…
+<Register>   : msgType=0x01 | uint8 proxyType | uint16 remotePort | uint16 localPort | N bytes name
 ```
 
-Then the transporter sends it in-band:
+### Client sends proxy registrations
 
 ```go
-// client/proxy/proxy_manager.go
-func (pm *Manager) HandleEvent(payload any) error {
-    var m msg.Message
-    switch e := payload.(type) {
-    case *event.StartProxyPayload:
-        m = e.NewProxyMsg
-        ...
+// internal/client/proxy/handler.go
+func (h *Handler) RegisterProxies(stream *smux.Stream) {
+    // Send handshake
+    tunnel.WriteHandshake(stream, tunnel.AuthMethodToken, []byte(h.config.Token))
+
+    // Register each proxy from config
+    for name, proxy := range h.config.Proxies {
+        tunnel.WriteRegister(
+            stream,
+            proxyType,                    // TCP=1, UDP=2
+            uint16(proxy.RemotePort),     // Port exposed on server
+            uint16(proxy.LocalPort),      // Local service port
+            name                          // Proxy identifier
+        )
+        // Store the active proxy
+        h.activeProxies[name] = &Proxy{...}
     }
-    return pm.msgTransporter.Send(m)
 }
 ```
 
-### Server handles NewProxy
+### Server handles registrations
 
-the server receives msg.NewProxy, validates it, instantiates the appropriate Proxy object, calls its Run(), and finally replies with NewProxyResp:
+The server processes each registration and starts the appropriate listeners:
 
 ```go
-// server/control.go
-func (ctl *Control) handleNewProxy(m msg.Message) {
-    inMsg := m.(*msg.NewProxy)
+// internal/server/controller/handler.go
+func (h *Handler) handleRegisterMsg(client *proxy.ClientInfo, data []byte) {
+    // Parse the registration message
+    proxyType := data[0]
+    remotePort := binary.BigEndian.Uint16(data[1:3])
+    localPort := binary.BigEndian.Uint16(data[3:5])
+    name := string(data[5:])
 
-    // plugin hook omitted...
+    // Register the proxy
+    newProxy, err := h.proxyManager.RegisterProxy(client, name, proxyType, remotePort, localPort)
 
-    // actually register the proxy: alloc ports, start listeners, etc.
-    if remoteAddr, err := ctl.RegisterProxy(inMsg); err != nil {
-        resp.Error = fmt.Sprintf("new proxy error: %v", err)
-    } else {
-        resp.RemoteAddr = remoteAddr
+    // For TCP proxies, start TCP listener
+    if proxyType == tunnel.ProxyTypeTCP {
+        proxy.StartTCPListener(newProxy, client)
     }
-    _ = ctl.msgDispatcher.Send(resp)  // send NewProxyResp
-}
-```
-
-The core of RegisterProxy does the work of creating and running the server-side proxy:
-
-```go
-// server/control.go
-func (ctl *Control) RegisterProxy(pxyMsg *msg.NewProxy) (remoteAddr string, err error) {
-    // build the v1.ProxyConfigurer from the JSON message
-    pxyConf, err := config.NewProxyConfigurerFromMsg(pxyMsg, ctl.serverCfg)
-    ...
-    // NewProxy returns a Proxy interface (TCPProxy, UDPProxy, HTTPProxy, etc.)
-    pxy, err := proxy.NewProxy(..., pxyConf, ctl.serverCfg)
-    ...
-    remoteAddr, err = pxy.Run() // open listeners
-    ...
-    ctl.pxyManager.Add(pxyMsg.ProxyName, pxy)
-    return
-}
-```
-
-### Client handles NewProxyResp
-
-Back in the client, Control.handleNewProxyResp marks the proxy as running or errored:
-
-```go
-// client/control.go
-func (ctl *Control) handleNewProxyResp(m msg.Message) {
-    inMsg := m.(*msg.NewProxyResp)
-    err := ctl.pm.StartProxy(inMsg.ProxyName, inMsg.RemoteAddr, inMsg.Error)
-    ...
 }
 ```
 
@@ -135,290 +110,88 @@ func (ctl *Control) handleNewProxyResp(m msg.Message) {
 
 ## 3. TCP proxy data path
 
-Once the proxy handshake is done, the server begins listening on the target TCP port, and for each incoming user connection it grabs a "work connection" to the client and tunnels bytes back and forth. The client accepts that work connection and forwards the data to/from the local service.
+When a user connects to an exposed port on the server, the server creates a new smux stream to the client and sends information about which proxy was requested.
 
-### 3.1 Server-side TCP listener
-
-When you start a TCP proxy, the server does roughly:
+### Server side: incoming connection handling
 
 ```go
-// server/proxy/tcp.go
-func (pxy *TCPProxy) Run() (remoteAddr string, err error) {
-    // acquire or bind a listening port on server side
-    listener, errRet := net.Listen("tcp", net.JoinHostPort(pxy.serverCfg.ProxyBindAddr, strconv.Itoa(pxy.deploymentPort)))
-    pxy.listeners = append(pxy.listeners, listener)
-    xlog.FromContextSafe(pxy.ctx).Infof("tcp proxy listen port [%d]", pxy.cfg.RemotePort)
+// internal/server/proxy/tcp.go
+func acceptConnections(listener net.Listener, client *ClientInfo, proxy *ProxyInfo) {
+    for {
+        conn, err := listener.Accept()
+        // Handle each incoming connection in a goroutine
+        go handleProxyConnection(conn, client, proxy)
+    }
+}
 
-    pxy.cfg.RemotePort = pxy.realBindPort
-    remoteAddr = fmt.Sprintf(":%d", pxy.realBindPort)
-    pxy.startCommonTCPListenersHandler()   // spawn accept loop
-    return
+func handleProxyConnection(conn net.Conn, client *ClientInfo, proxy *ProxyInfo) {
+    // Open a new stream to the client
+    stream, err := client.Session.OpenStream()
+
+    // Send NewStream message with proxy information
+    // Format: msgType + streamID + remotePort + nameLen + proxyName
+    msgBuf[0] = tunnel.MsgTypeNewStream
+    binary.BigEndian.PutUint32(msgBuf[1:5], streamID)
+    binary.BigEndian.PutUint16(msgBuf[5:7], proxy.RemotePort)
+    msgBuf[7] = byte(nameLen)
+    copy(msgBuf[8:], nameBytes)
+
+    // Copy data bidirectionally
+    go io.Copy(stream, conn)  // user → client
+    io.Copy(conn, stream)     // client → user
 }
 ```
 
-The shared accept/dispatch code in BaseProxy then spins off a goroutine per listener:
+### Client side: handling stream requests
+
+When the client receives a new stream, it determines which local service to connect to based on the proxy information:
 
 ```go
-// server/proxy/proxy.go
-func (pxy *BaseProxy) startCommonTCPListenersHandler() {
-    for _, listener := range pxy.listeners {
-        go func(l net.Listener) {
-            for {
-                c, err := l.Accept()
-                if err != nil {
-                    xlog.FromContextSafe(pxy.ctx).Warnf("listener closed: %v", err)
-                    return
-                }
-                xlog.FromContextSafe(pxy.ctx).Infof("get a user connection [%s]", c.RemoteAddr())
-                go pxy.handleUserTCPConnection(c)
-            }
-        }(listener)
-    }
-}
-```
+// internal/client/proxy/handler.go
+func (h *Handler) handleNewStream(stream *smux.Stream) {
+    // Parse stream ID and proxy info
+    streamID := binary.BigEndian.Uint32(streamIDBuf)
+    remotePort := binary.BigEndian.Uint16(headerBuf[0:2])
+    nameLen := int(headerBuf[2])
+    proxyName := string(nameBytes)
 
-### 3.2 Server-side binding user↔workConn
+    // Find the matching local service
+    // (first by name, then by remote port)
 
-Each accepted userConn is paired with a pooled "work connection" to the client. Bytes flow from userConn↔workConn:
+    // Connect to the local service
+    localConn, err := net.Dial("tcp", fmt.Sprintf("localhost:%d", localPort))
 
-```go
-// server/proxy/proxy.go
-func (pxy *BaseProxy) handleUserTCPConnection(userConn net.Conn) {
-    defer userConn.Close()
-
-    // pull a ready workConn (client→server TCP stream)
-    workConn, err := pxy.GetWorkConnFromPool(userConn.RemoteAddr(), userConn.LocalAddr())
-    if err != nil {
-        return
-    }
-    defer workConn.Close()
-
-    // apply optional encryption/compression/limiter on workConn side
-    local := workConn
-    if pxy.GetLimiter() != nil { ... }
-    if pxy.configurer.GetBaseConfig().Transport.UseEncryption { ... }
-    if pxy.configurer.GetBaseConfig().Transport.UseCompression { ... }
-
-    // finally join the two streams:
-    inCount, outCount, _ := libio.Join(local, userConn)
-    metrics.Server.AddTrafficIn( ... , inCount)
-    metrics.Server.AddTrafficOut(... , outCount)
-}
-```
-
-### 3.3 Client-side receiving workConn & piping to local service
-
-On the client side, BaseProxy.InWorkConn is called when a StartWorkConn message arrives; that in turn calls HandleTCPWorkConnection:
-
-```go
-// client/proxy/proxy.go
-func (pxy *BaseProxy) InWorkConn(conn net.Conn, m *msg.StartWorkConn) {
-    if pxy.inWorkConnCallback != nil && !pxy.inWorkConnCallback(...) {
-        return
-    }
-    pxy.HandleTCPWorkConnection(conn, m, []byte(pxy.clientCfg.Auth.Token))
-}
-
-// common handler for tcp work connections
-func (pxy *BaseProxy) HandleTCPWorkConnection(workConn net.Conn, m *msg.StartWorkConn, encKey []byte) {
-    // apply limiter/encryption/compression
-    remote := workConn
-    if pxy.limiter != nil { ... }
-    if pxy.baseCfg.Transport.UseEncryption { ... }
-    if pxy.baseCfg.Transport.UseCompression { ... }
-
-    // dial the local service
-    localConn, err := libnet.Dial(net.JoinHostPort(baseCfg.LocalIP, strconv.Itoa(baseCfg.LocalPort)), ...)
-    if err != nil { workConn.Close(); return }
-
-    // shuttle data between workConn and localConn
-    _, _, errs := libio.Join(localConn, remote)
-    ...
-}
-```
-
-The "general TCP" proxy factory wires up all TCP-based protocols (raw TCP, HTTP, HTTPS, STCP, TCPMux):
-
-```go
-// client/proxy/general_tcp.go
-func init() {
-    pxyConfs := []v1.ProxyConfigurer{
-        &v1.TCPProxyConfig{},
-        &v1.HTTPProxyConfig{},
-        &v1.HTTPSProxyConfig{},
-        &v1.STCPProxyConfig{},
-        &v1.TCPMuxProxyConfig{},
-    }
-    for _, cfg := range pxyConfs {
-        RegisterProxyFactory(reflect.TypeOf(cfg), NewGeneralTCPProxy)
-    }
-}
-
-type GeneralTCPProxy struct{ *BaseProxy }
-func NewGeneralTCPProxy(baseProxy *BaseProxy, _ v1.ProxyConfigurer) Proxy {
-    return &GeneralTCPProxy{BaseProxy: baseProxy}
+    // Copy data bidirectionally
+    go io.Copy(stream, localConn)  // local → server
+    io.Copy(localConn, stream)     // server → local
 }
 ```
 
 ---
 
-## 4. UDP proxy data path
+## 4. UDP proxy data path (Future Implementation)
 
-UDP tunneling in mgrok must multiplex unreliable datagrams over TCP. mgrok does this by framing each UDP packet in a msg.UDPPacket and sending it over the workConn, plus heartbeats (msg.Ping) to detect closure.
+UDP support is currently defined in the protocol but not fully implemented. The plan is to handle UDP by:
 
-### 4.1 UDP packet framing helpers
+1. Server binding a UDP socket for each UDP proxy
+2. Encapsulating UDP datagrams as messages over the multiplexed TCP connection
+3. Client unpacking these datagrams and forwarding to the local UDP service
 
-The shared helper in pkg/proto/udp encodes each datagram as base64 in a JSON message and offers in-process forwarding functions:
+The UDP message format will be:
 
-```go
-// pkg/proto/udp/udp.go
-func NewUDPPacket(buf []byte, laddr, raddr *net.UDPAddr) *msg.UDPPacket {
-    return &msg.UDPPacket{
-        Content: base64.StdEncoding.EncodeToString(buf),
-        LocalAddr: laddr,
-        RemoteAddr: raddr,
-    }
-}
-
-func GetContent(m *msg.UDPPacket) (buf []byte, err error) {
-    return base64.StdEncoding.DecodeString(m.Content)
-}
 ```
-
-#### ForwardUserConn (server side)
-
-Reads from the readCh (packets from client) and writes them to the UDP socket bound for external clients; then reads from that socket and pushes packets into sendCh back to the client:
-
-```go
-// pkg/proto/udp/udp.go
-func ForwardUserConn(udpConn *net.UDPConn, readCh <-chan *msg.UDPPacket, sendCh chan<- *msg.UDPPacket, bufSize int) {
-    // from client → external clients
-    go func() {
-        for udpMsg := range readCh {
-            buf, err := GetContent(udpMsg)
-            if err != nil { continue }
-            _, _ = udpConn.WriteToUDP(buf, udpMsg.RemoteAddr)
-        }
-    }()
-    // from external clients → client
-    buf := pool.GetBuf(bufSize); defer pool.PutBuf(buf)
-    for {
-        n, remoteAddr, err := udpConn.ReadFromUDP(buf)
-        if err != nil { return }
-        udpMsg := NewUDPPacket(buf[:n], nil, remoteAddr)
-        select { case sendCh <- udpMsg: default: }
-    }
-}
-```
-
-#### Forwarder (client side)
-
-Binds a local UDP socket to your local service, and bridges packets between readCh (from server) and sendCh (back to server) with a per-remote-client net.UDPConn:
-
-```go
-// pkg/proto/udp/udp.go
-func Forwarder(dstAddr *net.UDPAddr, readCh <-chan *msg.UDPPacket, sendCh chan<- msg.Message, bufSize int) {
-    var mu sync.RWMutex
-    udpConnMap := make(map[string]*net.UDPConn)
-
-    // writerFn reads replies from local service → sendCh
-    ...
-    // pump packets from readCh → local service dstAddr
-    go func() {
-        for udpMsg := range readCh {
-            buf, _ := GetContent(udpMsg)
-            mu.Lock()
-            udpConn, ok := udpConnMap[udpMsg.RemoteAddr.String()]
-            if !ok {
-                udpConn, _ = net.DialUDP("udp", nil, dstAddr)
-                udpConnMap[udpMsg.RemoteAddr.String()] = udpConn
-            }
-            mu.Unlock()
-            udpConn.Write(buf)
-            if !ok {
-                go writerFn(udpMsg.RemoteAddr, udpConn)
-            }
-        }
-    }()
-}
-```
-
-### 4.2 Server-side UDP proxy
-
-The server binds the public UDP port, then waits for work connections from the client. It spins up two goroutines on each workConn: one to read framed packets (UDPPacket) or heartbeat (Ping), the other to send packets back.
-
-```go
-// server/proxy/udp.go
-func (pxy *UDPProxy) Run() (remoteAddr string, err error) {
-    // bind the UDP port
-    pxy.realBindPort, err = pxy.rc.UDPPortManager.Acquire(...)
-    addr, _ := net.ResolveUDPAddr("udp", fmt.Sprintf("%s:%d", pxy.serverCfg.ProxyBindAddr, pxy.realBindPort))
-    pxy.udpConn, _ = net.ListenUDP("udp", addr)
-    pxy.sendCh = make(chan *msg.UDPPacket, 1024)
-    pxy.readCh = make(chan *msg.UDPPacket, 1024)
-    pxy.checkCloseCh = make(chan int)
-
-    // spawn the read/write loops over the workConn pool
-    go func() {
-        time.Sleep(500 * time.Millisecond)
-        for {
-            workConn, err := pxy.GetWorkConnFromPool(nil, nil)
-            if err != nil {
-                time.Sleep(time.Second); continue
-            }
-            pxy.workConn.Close()  // drop old conn
-            // wrap encryption/compression/limiter...
-            pxy.workConn = wrappedConn
-            go workConnReaderFn(pxy.workConn)
-            go workConnSenderFn(pxy.workConn, ctx)
-            <-pxy.checkCloseCh
-        }
-    }()
-
-    // bind UDP port <> message channels
-    go func() {
-        udp.ForwardUserConn(pxy.udpConn, pxy.readCh, pxy.sendCh, int(pxy.serverCfg.UDPPacketSize))
-        pxy.Close()
-    }()
-    return fmt.Sprintf(":%d", pxy.realBindPort), nil
-}
-```
-
-### 4.3 Client-side UDP proxy
-
-On the client, the Run() simply resolves the local UDP address; the real work begins when a workConn arrives (InWorkConn):
-
-```go
-// client/proxy/udp.go
-func (pxy *UDPProxy) Run() error {
-    pxy.localAddr, err = net.ResolveUDPAddr("udp", fmt.Sprintf("%s:%d", pxy.cfg.LocalIP, pxy.cfg.LocalPort))
-    return err
-}
-
-func (pxy *UDPProxy) InWorkConn(conn net.Conn, _ *msg.StartWorkConn) {
-    // drop prior state
-    pxy.Close()
-
-    // wrap encryption/compression/limiter...
-    pxy.workConn = conn; pxy.readCh = make(chan *msg.UDPPacket, 1024); pxy.sendCh = make(chan msg.Message, 1024)
-
-    // reader: workConn → readCh
-    go workConnReaderFn(pxy.workConn, pxy.readCh)
-    // writer: sendCh → workConn
-    go workConnSenderFn(pxy.workConn, pxy.sendCh)
-    // heartbeat ping
-    go heartbeatFn(pxy.sendCh)
-
-    // finally bridge localAddr ↔ readCh/sendCh
-    udp.Forwarder(pxy.localAddr, pxy.readCh, pxy.sendCh, int(pxy.clientCfg.UDPPacketSize))
-}
+<UDPPacket> : msgType | sourceAddr | destinationAddr | uint16 length | payload
 ```
 
 ---
 
 ## Summary
 
-- Control channel (TCP) carries JSON-framed control messages (NewProxy, StartWorkConn, UDPPacket, Ping, …) multiplexed via a yamux-style transporter.
-- "NewProxy" handshake tells the server which proxy (TCP/UDP/etc.) to open and returns the remoteAddr to listen on.
-- TCP proxy: the server listens on a TCP port and for each incoming connection grabs a workConn to the client; the client connects that workConn to the local service and shuttles bytes.
-- UDP proxy: the server binds a UDP socket and sends/receives each datagram as a base64-encoded msg.UDPPacket over the workConn; on the client side the packet is unwrapped and forwarded to the local UDP service (and vice versa).
+- A single TCP connection is multiplexed to carry both control messages and data streams
+- The control stream handles registration, heartbeats, and administrative messages
+- For each user connection, a new multiplexed stream is created within the session
+- TCP proxying works by copying data between user connection ↔ multiplexed stream ↔ local service
+- The server includes proxy identification in each new stream request
+- The client matches this information to connect to the correct local service
+
+This approach allows many services to be exposed through a single connection, with minimal overhead and maximum efficiency.

@@ -77,28 +77,55 @@ For local development and testing, TLS is disabled by default to simplify setup:
    python -m http.server 8080
    ```
 
-2. **Start your server and client**:
+2. **Configure your proxies** - The `configs/client.yaml` file defines which local services to expose:
+
+   ```yaml
+   server: localhost:9000
+   token: sample_token
+   proxies:
+     ssh:
+       type: tcp
+       local_port: 22
+       remote_port: 6000
+     web:
+       type: tcp
+       local_port: 8080
+       remote_port: 8000
+     game:
+       type: udp
+       local_port: 7777
+       remote_port: 7777
+   ```
+
+   This configures three tunnels simultaneously:
+
+   - SSH server (port 22) → exposed at port 6000
+   - Web server (port 8080) → exposed at port 8000
+   - UDP game server (port 7777) → exposed at port 7777
+
+3. **Start your server and client**:
 
    ```
    ./build/mgrok-server
    ./build/mgrok-client
    ```
 
-3. **Verify proxy registration** - In the client logs, you should see:
+4. **Verify proxy registration** - The client will register all proxies defined in the config:
 
    ```
+   Registered proxy ssh: tcp port 22 -> 6000
    Registered proxy web: tcp port 8080 -> 8000
+   Registered proxy game: udp port 7777 -> 7777
    ```
 
-Now you should be able to access your local web server at `http://localhost:8000` - the connection will be tunneled through mgrok to your local port 8080. Try running `curl localhost:8000` or opening a browser to verify the tunnel is working properly!
-
-4. **Test the tunnel** - Connect to the exposed port on your server:
+5. **Test the tunnel** - Connect to any exposed port on your server:
 
    ```
-   curl localhost:8000
+   curl localhost:8000     # Access your web server
+   ssh localhost -p 6000   # Connect to your SSH server (if running)
    ```
 
-5. **Observe the logs**:
+6. **Observe the logs**:
    - Server: "New connection for proxy web from 127.0.0.1:xxxxx"
    - Client: "Connecting to local service at localhost:8080"
    - Client: Stream opened and closed when the connection completes
@@ -107,8 +134,8 @@ This test shows:
 
 1. A user connects to the exposed server port
 2. Server creates a data stream to client
-3. Client connects to the local service
-4. Data is copied bidirectionally
+3. Client identifies which proxy was requested and connects to the corresponding local service
+4. Data is copied bidirectionally through the multiplexed tunnel
 
 The tunnel's success is visible through the logs and the actual data transfer working correctly.
 
