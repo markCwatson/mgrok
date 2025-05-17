@@ -3,13 +3,11 @@ package main
 import (
 	"flag"
 	"fmt"
-	"io"
 	"log"
 	"net"
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
 	"github.com/markCwatson/mgrok/internal/client/proxy"
 	"github.com/xtaci/smux"
@@ -54,6 +52,7 @@ func main() {
 
 	var proxyHandler *proxy.Handler = proxy.NewHandler(session, config)
 
+	// manages reg/heartbeat and stays open for the duration of the session
 	var ctrlStream *smux.Stream
 	ctrlStream, err = session.OpenStream()
 	if err != nil {
@@ -63,23 +62,13 @@ func main() {
 
 	proxyHandler.RegisterProxies(ctrlStream)
 
-	var testStream *smux.Stream
-	testStream, err = session.OpenStream()
-	if err != nil {
-		log.Fatalf("Failed to open test stream: %v", err)
-	}
-	defer testStream.Close()
-
-	go sendTestMessages(testStream)
-	go receiveResponses(testStream)
-
 	// Set up signal handling for clean shutdown
 	var sigChan chan os.Signal = make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
 	go acceptStreams(session, proxyHandler)
 
-	// Wait for termination signal
+	// Wait for termination signal (SIGINT or SIGTERM)
 	<-sigChan
 	log.Println("Shutting down client...")
 }
@@ -111,37 +100,5 @@ func acceptStreams(session *smux.Session, handler *proxy.Handler) {
 		}
 
 		go handler.HandleStream(stream)
-	}
-}
-
-func sendTestMessages(stream *smux.Stream) {
-	count := 1
-	for {
-		message := fmt.Sprintf("Test message #%d from client", count)
-		_, err := stream.Write([]byte(message))
-		if err != nil {
-			log.Printf("Failed to send test message: %v", err)
-			return
-		}
-		log.Printf("Sent: %s", message)
-		count++
-		time.Sleep(5 * time.Second)
-	}
-}
-
-func receiveResponses(stream *smux.Stream) {
-	var err error
-	var buffer []byte = make([]byte, 1024)
-	for {
-		var n int
-		n, err = stream.Read(buffer)
-		if err != nil {
-			if err != io.EOF {
-				log.Printf("Error reading from stream: %v", err)
-			}
-			return
-		}
-		var message string = string(buffer[:n])
-		log.Printf("Received: %s", message)
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"time"
 
 	"github.com/markCwatson/mgrok/internal/tunnel"
 	"github.com/xtaci/smux"
@@ -48,20 +49,24 @@ func NewHandler(session *smux.Session, config *Config) *Handler {
 }
 
 // RegisterProxies registers all proxies with the server
-func (h *Handler) RegisterProxies(conn net.Conn) {
+func (h *Handler) RegisterProxies(stream *smux.Stream) {
 	log.Println("Registering proxies...")
 
 	// Write the protocol handshake
-	if err := tunnel.WriteHandshake(conn, tunnel.AuthMethodToken, []byte(h.config.Token)); err != nil {
+	if err := tunnel.WriteHandshake(stream, tunnel.AuthMethodToken, []byte(h.config.Token)); err != nil {
 		log.Printf("Failed to write handshake: %v", err)
 		return
 	}
 
+	// Wait a moment to ensure the server processes the handshake
+	time.Sleep(100 * time.Millisecond)
+
 	// Register each proxy in the config
 	for name, proxy := range h.config.Proxies {
+		log.Printf("Registering proxy: %s", name)
+
 		var proxyType uint8
 
-		// Convert string type to uint8 protocol type
 		switch proxy.Type {
 		case "tcp":
 			proxyType = tunnel.ProxyTypeTCP
@@ -74,7 +79,7 @@ func (h *Handler) RegisterProxies(conn net.Conn) {
 
 		// Send registration message
 		err := tunnel.WriteRegister(
-			conn,
+			stream,
 			proxyType,
 			uint16(proxy.RemotePort),
 			uint16(proxy.LocalPort),
@@ -96,6 +101,9 @@ func (h *Handler) RegisterProxies(conn net.Conn) {
 
 		log.Printf("Registered proxy %s: %s port %d -> %d",
 			name, proxy.Type, proxy.LocalPort, proxy.RemotePort)
+
+		// Wait a moment between registrations to prevent messages from blending together
+		time.Sleep(100 * time.Millisecond)
 	}
 }
 
@@ -125,7 +133,7 @@ func (h *Handler) HandleStream(stream *smux.Stream) {
 
 // handleNewStream handles a new stream request from the server
 func (h *Handler) handleNewStream(stream *smux.Stream) {
-	// Read the stream ID (uint32)
+	// Read the message header first (just streamID)
 	streamIDBuf := make([]byte, 4)
 	if _, err := io.ReadFull(stream, streamIDBuf); err != nil {
 		log.Printf("Failed to read stream ID: %v", err)
@@ -133,23 +141,68 @@ func (h *Handler) handleNewStream(stream *smux.Stream) {
 	}
 
 	streamID := binary.BigEndian.Uint32(streamIDBuf)
-	log.Printf("New stream request for ID %d", streamID)
 
-	// Find the appropriate local port
-	// In a more advanced implementation, the server would indicate which proxy this is for
-
-	// Check if we have proxies
-	if len(h.config.Proxies) == 0 {
-		log.Printf("No proxies configured, cannot handle stream %d", streamID)
-		stream.Close()
+	// Now read the proxy info part
+	headerBuf := make([]byte, 3) // remotePort(2) + nameLen(1)
+	if _, err := io.ReadFull(stream, headerBuf); err != nil {
+		log.Printf("Failed to read proxy info: %v", err)
 		return
 	}
 
-	// Get the first proxy (for demonstration purposes)
+	remotePort := binary.BigEndian.Uint16(headerBuf[0:2])
+	nameLen := int(headerBuf[2])
+
+	// Read the proxy name
+	nameBytes := make([]byte, nameLen)
+	if nameLen > 0 {
+		if _, err := io.ReadFull(stream, nameBytes); err != nil {
+			log.Printf("Failed to read proxy name: %v", err)
+			return
+		}
+	}
+	proxyName := string(nameBytes)
+
+	log.Printf("New stream request for ID %d, proxy: %s, remote port: %d",
+		streamID, proxyName, remotePort)
+
+	// Find the matching local port for this proxy
 	var localPort int
-	for _, proxy := range h.config.Proxies {
-		localPort = proxy.LocalPort
-		break
+	var proxyFound bool
+
+	// First try to find by name
+	if proxyName != "" {
+		if proxy, exists := h.config.Proxies[proxyName]; exists {
+			localPort = proxy.LocalPort
+			proxyFound = true
+			log.Printf("Found proxy by name: %s -> localhost:%d", proxyName, localPort)
+		}
+	}
+
+	// Fallback to finding by remote port if name lookup failed
+	if !proxyFound {
+		for _, proxy := range h.config.Proxies {
+			if proxy.RemotePort == int(remotePort) {
+				localPort = proxy.LocalPort
+				proxyFound = true
+				log.Printf("Found proxy by port: %d -> localhost:%d", remotePort, localPort)
+				break
+			}
+		}
+	}
+
+	// If still not found, use the first proxy as a last resort
+	if !proxyFound {
+		if len(h.config.Proxies) == 0 {
+			log.Printf("No proxies configured, cannot handle stream %d", streamID)
+			stream.Close()
+			return
+		}
+
+		log.Printf("Warning: Could not find matching proxy, using first available")
+		for _, proxy := range h.config.Proxies {
+			localPort = proxy.LocalPort
+			break
+		}
 	}
 
 	// Connect to the local service

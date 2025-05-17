@@ -70,18 +70,47 @@ This will create the following architecture-specific binaries in the `build` dir
 
 For local development and testing, TLS is disabled by default to simplify setup:
 
-1. **Start the server** (in one terminal):
+1. **Start a local service** - Run something on your local port like a web server (can use `mgrok/web` directory):
 
-   ```bash
+   ```
+   cd ./web
+   python -m http.server 8080
+   ```
+
+2. **Start your server and client**:
+
+   ```
    ./build/mgrok-server
+   ./build/mgrok-client
    ```
 
-2. **Start the client** (in another terminal):
-   ```bash
-   ./build/mgrok-client --server localhost:9000
+3. **Verify proxy registration** - In the client logs, you should see:
+
+   ```
+   Registered proxy web: tcp port 8080 -> 8000
    ```
 
-The client will automatically connect to the server running on your local machine. This allows you to quickly test the functionality without dealing with TLS certificates or domain name resolution.
+Now you should be able to access your local web server at `http://localhost:8000` - the connection will be tunneled through mgrok to your local port 8080. Try running `curl localhost:8000` or opening a browser to verify the tunnel is working properly!
+
+4. **Test the tunnel** - Connect to the exposed port on your server:
+
+   ```
+   curl localhost:8000
+   ```
+
+5. **Observe the logs**:
+   - Server: "New connection for proxy web from 127.0.0.1:xxxxx"
+   - Client: "Connecting to local service at localhost:8080"
+   - Client: Stream opened and closed when the connection completes
+
+This test shows:
+
+1. A user connects to the exposed server port
+2. Server creates a data stream to client
+3. Client connects to the local service
+4. Data is copied bidirectionally
+
+The tunnel's success is visible through the logs and the actual data transfer working correctly.
 
 #### Production Setup
 

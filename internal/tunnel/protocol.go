@@ -2,7 +2,9 @@ package tunnel
 
 import (
 	"encoding/binary"
+	"fmt"
 	"io"
+	"log"
 )
 
 const (
@@ -22,6 +24,15 @@ const (
 	AuthMethodmTLS  = 0x02
 )
 
+// Updated protocol message formats:
+//
+// <Handshake> : 4 bytes "GRT1" + uint8 authMethod + authPayload…
+// <Register>   : msgType=0x01 | uint8 proxyType | uint16 remotePort | uint16 localPort | N bytes name
+// <NewStream>  : msgType=0x02 | uint32 streamID | uint16 remotePort | uint8 nameLen | N bytes name
+// <Data>       : msgType=0x03 | uint32 streamID | uint16 length | …bytes…
+// <Close>      : msgType=0x04 | uint32 streamID
+// <Heartbeat>  : msgType=0x05
+
 // Protocol handshake: 4 bytes "GRT1" + uint8 authMethod + authPayload
 type Handshake struct {
 	Magic       [4]byte // "GRT1"
@@ -37,9 +48,12 @@ type RegisterMsg struct {
 	Name       string
 }
 
-// NewStream message: msgType=0x02 | uint32 streamID
+// NewStream message: msgType=0x02 | uint32 streamID | uint16 remotePort | uint8 nameLen | N bytes name
 type NewStreamMsg struct {
-	StreamID uint32
+	StreamID   uint32
+	RemotePort uint16
+	NameLen    uint8
+	Name       string
 }
 
 // Data message: msgType=0x03 | uint32 streamID | uint16 length | …bytes…
@@ -54,44 +68,54 @@ type CloseMsg struct {
 	StreamID uint32
 }
 
-// WriteHandshake writes a protocol handshake to the writer
+// WriteHandshake writes a protocol handshake to any io.Writer (such as a control stream)
 func WriteHandshake(w io.Writer, authMethod uint8, authPayload []byte) error {
-	// Write magic
-	if _, err := w.Write([]byte("GRT1")); err != nil {
-		return err
+	// Create the full handshake message
+	handshake := append([]byte("GRT1"), authMethod)
+	handshake = append(handshake, authPayload...)
+
+	// Log what we're sending
+	log.Printf("Sending handshake (%d bytes): [% x]", len(handshake), handshake)
+
+	// Write the full handshake in one call to ensure atomic write
+	_, err := w.Write(handshake)
+	if err != nil {
+		return fmt.Errorf("failed to write handshake: %w", err)
 	}
 
-	// Write auth method
-	if _, err := w.Write([]byte{authMethod}); err != nil {
-		return err
-	}
-
-	// Write auth payload
-	_, err := w.Write(authPayload)
-	return err
+	return nil
 }
 
-// WriteRegister writes a register message to the writer
+// WriteRegister writes a register message to any io.Writer (such as a control stream)
 func WriteRegister(w io.Writer, proxyType uint8, remotePort, localPort uint16, name string) error {
+	// Create a buffer to build the message
+	msgBuf := make([]byte, 0, 10+len(name))
+
 	// Message type
-	if _, err := w.Write([]byte{MsgTypeRegister}); err != nil {
-		return err
-	}
+	msgBuf = append(msgBuf, MsgTypeRegister)
 
 	// Proxy type
-	if _, err := w.Write([]byte{proxyType}); err != nil {
-		return err
-	}
+	msgBuf = append(msgBuf, proxyType)
 
-	// Ports
+	// Add remote port (2 bytes, big endian)
 	portBuf := make([]byte, 4)
 	binary.BigEndian.PutUint16(portBuf, remotePort)
 	binary.BigEndian.PutUint16(portBuf[2:], localPort)
-	if _, err := w.Write(portBuf); err != nil {
-		return err
+	msgBuf = append(msgBuf, portBuf...)
+
+	// Name (remainder of message)
+	msgBuf = append(msgBuf, []byte(name)...)
+
+	// Log what we're sending
+	log.Printf("Sending register message (%d bytes): [% x]", len(msgBuf), msgBuf)
+	log.Printf("Register details: type=%d, remote=%d, local=%d, name=%s",
+		proxyType, remotePort, localPort, name)
+
+	// Write the full message in one call
+	_, err := w.Write(msgBuf)
+	if err != nil {
+		return fmt.Errorf("failed to write register message: %w", err)
 	}
 
-	// Name
-	_, err := w.Write([]byte(name))
-	return err
+	return nil
 }

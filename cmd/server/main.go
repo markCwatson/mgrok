@@ -64,6 +64,7 @@ func serveClient(session *smux.Session) {
 	proxyManager.AddClient(clientID, session)
 	defer proxyManager.RemoveClient(clientID)
 
+	// manages reg/heartbeat and stays open for the duration of the session
 	var ctrlStream *smux.Stream
 	ctrlStream, err = session.AcceptStream()
 	if err != nil {
@@ -75,14 +76,15 @@ func serveClient(session *smux.Session) {
 	go controlHandler.HandleConnection(ctrlStream, session, clientID)
 
 	for {
-		var stream *smux.Stream
-		stream, err = session.AcceptStream()
+		// handles traffic (one per proxy)
+		var dataStream *smux.Stream
+		dataStream, err = session.AcceptStream()
 		if err != nil {
-			log.Printf("Error accepting stream: %v", err)
+			log.Printf("Error accepting data stream: %v", err)
 			return
 		}
 
-		go handleDataStream(stream)
+		go handleDataStream(dataStream)
 	}
 }
 

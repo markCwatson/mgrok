@@ -15,6 +15,14 @@ The control protocol is the communication mechanism between mgrok client and ser
 - **Work Connection**: A multiplexed stream used to tunnel actual TCP/UDP traffic
 - **Control Connection**: The dedicated stream used to exchange control messages
 
+## Stream Types
+
+The tunnel uses two main types of streams over a single multiplexed connection:
+
+1. **Control Stream**: A dedicated stream that handles registration, heartbeats, and administrative messages. This stream is opened first and stays open for the duration of the session.
+
+2. **Data Streams**: On-demand streams created to handle actual traffic forwarding. Each proxied connection gets its own data stream, allowing multiple concurrent connections to share the same TCP connection.
+
 ## Message Format
 
 The protocol uses binary messages with the following format:
@@ -37,7 +45,7 @@ The protocol supports two proxy types:
 
 ## Flow
 
-1. Client connects to server and establishes a multiplexed session
+1. Client connects to server and establishes a session
 2. Client opens a control stream and registers desired proxies
 3. Server binds requested ports and responds with success/failure
 4. When users connect to server ports, server signals client via control protocol
