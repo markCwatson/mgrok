@@ -25,7 +25,6 @@ func main() {
 	var port *int = flag.Int("port", 9000, "Port to listen on")
 	flag.Parse()
 
-	// Use plain TCP for development
 	var ln net.Listener
 	ln, err = net.Listen("tcp", fmt.Sprintf(":%d", *port))
 	if err != nil {
@@ -63,7 +62,6 @@ func serveClient(session *smux.Session) {
 
 	clientID := fmt.Sprintf("%p", session)
 	proxyManager.AddClient(clientID, session)
-
 	defer proxyManager.RemoveClient(clientID)
 
 	var ctrlStream *smux.Stream
@@ -74,10 +72,8 @@ func serveClient(session *smux.Session) {
 	}
 	defer ctrlStream.Close()
 
-	// Handle control connection
 	go controlHandler.HandleConnection(ctrlStream, session, clientID)
 
-	// Accept and handle other streams
 	for {
 		var stream *smux.Stream
 		stream, err = session.AcceptStream()

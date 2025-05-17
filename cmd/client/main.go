@@ -23,24 +23,20 @@ func main() {
 	serverAddr := flag.String("server", "", "Server address (overrides config file)")
 	flag.Parse()
 
-	// Load configuration
 	var config *proxy.Config
 	config, err = loadConfig(*configPath)
 	if err != nil {
 		log.Fatalf("Failed to load config: %v", err)
 	}
 
-	// Override server address if provided via command line
 	if *serverAddr != "" {
 		config.Server = *serverAddr
 	}
 
-	// Use localhost:9000 if not specified
 	if config.Server == "" {
 		config.Server = "localhost:9000"
 	}
 
-	// Connect to server with plain TCP for development
 	log.Printf("Connecting to server at %s", config.Server)
 	var conn net.Conn
 	conn, err = net.Dial("tcp", config.Server)
@@ -49,7 +45,6 @@ func main() {
 	}
 	defer conn.Close()
 
-	// Set up multiplexing
 	var session *smux.Session
 	session, err = smux.Client(conn, nil)
 	if err != nil {
@@ -57,10 +52,8 @@ func main() {
 	}
 	defer session.Close()
 
-	// Create proxy handler
-	proxyHandler := proxy.NewHandler(session, config)
+	var proxyHandler *proxy.Handler = proxy.NewHandler(session, config)
 
-	// Open control stream
 	var ctrlStream *smux.Stream
 	ctrlStream, err = session.OpenStream()
 	if err != nil {
@@ -68,10 +61,8 @@ func main() {
 	}
 	defer ctrlStream.Close()
 
-	// Register proxies
 	proxyHandler.RegisterProxies(ctrlStream)
 
-	// Open a test stream for sending messages
 	var testStream *smux.Stream
 	testStream, err = session.OpenStream()
 	if err != nil {
@@ -86,7 +77,6 @@ func main() {
 	var sigChan chan os.Signal = make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
-	// Accept and handle streams from the server
 	go acceptStreams(session, proxyHandler)
 
 	// Wait for termination signal

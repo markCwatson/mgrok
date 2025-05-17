@@ -33,18 +33,14 @@ func (h *Handler) HandleConnection(conn net.Conn, session *smux.Session, clientI
 	}
 
 	client.CtrlStream = conn.(*smux.Stream)
-
-	// Buffer for reading messages
 	buffer := make([]byte, 1024)
 
-	// Wait for handshake first
 	n, err := conn.Read(buffer)
 	if err != nil {
 		log.Printf("Error reading handshake: %v", err)
 		return
 	}
 
-	// Verify magic "GRT1"
 	if n < 5 || string(buffer[:4]) != "GRT1" {
 		log.Printf("Invalid handshake magic: %s", string(buffer[:4]))
 		return
