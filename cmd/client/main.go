@@ -26,12 +26,15 @@ type Config struct {
 }
 
 func main() {
+	var err error
+
 	configPath := flag.String("config", "configs/client.yaml", "Path to config file")
 	serverAddr := flag.String("server", "", "Server address (overrides config file)")
 	flag.Parse()
 
 	// Load configuration
-	config, err := loadConfig(*configPath)
+	var config *Config
+	config, err = loadConfig(*configPath)
 	if err != nil {
 		log.Fatalf("Failed to load config: %v", err)
 	}
@@ -48,21 +51,24 @@ func main() {
 
 	// Connect to server with plain TCP for development
 	log.Printf("Connecting to server at %s", config.Server)
-	conn, err := net.Dial("tcp", config.Server)
+	var conn net.Conn
+	conn, err = net.Dial("tcp", config.Server)
 	if err != nil {
 		log.Fatalf("Failed to connect to server: %v", err)
 	}
 	defer conn.Close()
 
 	// Set up multiplexing
-	session, err := smux.Client(conn, nil)
+	var session *smux.Session
+	session, err = smux.Client(conn, nil)
 	if err != nil {
 		log.Fatalf("Failed to create smux session: %v", err)
 	}
 	defer session.Close()
 
 	// Open control stream
-	ctrlStream, err := session.OpenStream()
+	var ctrlStream *smux.Stream
+	ctrlStream, err = session.OpenStream()
 	if err != nil {
 		log.Fatalf("Failed to open control stream: %v", err)
 	}
@@ -72,7 +78,8 @@ func main() {
 	registerProxies(ctrlStream, config)
 
 	// Open a test stream for sending messages
-	testStream, err := session.OpenStream()
+	var testStream *smux.Stream
+	testStream, err = session.OpenStream()
 	if err != nil {
 		log.Fatalf("Failed to open test stream: %v", err)
 	}
@@ -84,7 +91,7 @@ func main() {
 	go receiveResponses(testStream)
 
 	// Set up signal handling for clean shutdown
-	sigChan := make(chan os.Signal, 1)
+	var sigChan chan os.Signal = make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
 	// Accept streams from the server
@@ -96,7 +103,9 @@ func main() {
 }
 
 func loadConfig(path string) (*Config, error) {
-	data, err := os.ReadFile(path)
+	var data []byte
+	var err error
+	data, err = os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read config file: %w", err)
 	}
@@ -109,7 +118,7 @@ func loadConfig(path string) (*Config, error) {
 	return &config, nil
 }
 
-func registerProxies(conn net.Conn, config *Config) {
+func registerProxies(_ net.Conn, _ *Config) {
 	// TODO: Implement proxy registration using the protocol defined in the README
 	log.Println("Registering proxies (not yet implemented)")
 	// For each proxy in config.Proxies, register it with the server
@@ -117,7 +126,9 @@ func registerProxies(conn net.Conn, config *Config) {
 
 func acceptStreams(session *smux.Session) {
 	for {
-		stream, err := session.AcceptStream()
+		var stream *smux.Stream
+		var err error
+		stream, err = session.AcceptStream()
 		if err != nil {
 			log.Printf("Failed to accept stream: %v", err)
 			return
@@ -137,7 +148,7 @@ func handleStream(stream *smux.Stream) {
 
 	// This is just a placeholder
 	log.Printf("Received stream %d (not yet handling)", stream.ID())
-	
+
 	// Discard all data from the stream for now
 	io.Copy(io.Discard, stream)
 }
@@ -158,16 +169,18 @@ func sendTestMessages(stream *smux.Stream) {
 }
 
 func receiveResponses(stream *smux.Stream) {
-	buffer := make([]byte, 1024)
+	var err error
+	var buffer []byte = make([]byte, 1024)
 	for {
-		n, err := stream.Read(buffer)
+		var n int
+		n, err = stream.Read(buffer)
 		if err != nil {
 			if err != io.EOF {
 				log.Printf("Error reading from stream: %v", err)
 			}
 			return
 		}
-		message := string(buffer[:n])
+		var message string = string(buffer[:n])
 		log.Printf("Received: %s", message)
 	}
-} 
+}

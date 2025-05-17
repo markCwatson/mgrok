@@ -10,11 +10,14 @@ import (
 )
 
 func main() {
-	port := flag.Int("port", 9000, "Port to listen on")
+	var err error
+
+	var port *int = flag.Int("port", 9000, "Port to listen on")
 	flag.Parse()
 
 	// Use plain TCP for development
-	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", *port))
+	var ln net.Listener
+	ln, err = net.Listen("tcp", fmt.Sprintf(":%d", *port))
 	if err != nil {
 		log.Fatalf("Failed to listen: %v", err)
 	}
@@ -23,7 +26,8 @@ func main() {
 	log.Printf("Server listening on :%d", *port)
 
 	for {
-		conn, err := ln.Accept()
+		var conn net.Conn
+		conn, err = ln.Accept()
 		if err != nil {
 			log.Printf("Failed to accept connection: %v", err)
 			continue
@@ -32,7 +36,8 @@ func main() {
 		log.Printf("New connection from %s", conn.RemoteAddr())
 
 		// Wrap in smux
-		session, err := smux.Server(conn, nil)
+		var session *smux.Session
+		session, err = smux.Server(conn, nil)
 		if err != nil {
 			log.Printf("Failed to create smux session: %v", err)
 			conn.Close()
@@ -46,9 +51,11 @@ func main() {
 
 func serveClient(session *smux.Session) {
 	defer session.Close()
+	var err error
 
 	// Accept the control stream
-	ctrlStream, err := session.AcceptStream()
+	var ctrlStream *smux.Stream
+	ctrlStream, err = session.AcceptStream()
 	if err != nil {
 		log.Printf("Failed to accept control stream: %v", err)
 		return
@@ -60,7 +67,8 @@ func serveClient(session *smux.Session) {
 
 	// Accept and handle other streams
 	for {
-		stream, err := session.AcceptStream()
+		var stream *smux.Stream
+		stream, err = session.AcceptStream()
 		if err != nil {
 			log.Printf("Error accepting stream: %v", err)
 			return
@@ -88,22 +96,24 @@ func handleControl(conn net.Conn, _ *smux.Session) {
 
 func handleDataStream(stream *smux.Stream) {
 	defer stream.Close()
+	var err error
 
 	log.Printf("New data stream established: %d", stream.ID())
-	buffer := make([]byte, 1024)
+	var buffer []byte = make([]byte, 1024)
 
 	for {
-		n, err := stream.Read(buffer)
+		var n int
+		n, err = stream.Read(buffer)
 		if err != nil {
 			log.Printf("Stream %d closed: %v", stream.ID(), err)
 			return
 		}
 
-		message := string(buffer[:n])
+		var message string = string(buffer[:n])
 		log.Printf("Received on stream %d: %s", stream.ID(), message)
 
 		// Echo back with a prefix
-		response := fmt.Sprintf("Server received: %s", message)
+		var response string = fmt.Sprintf("Server received: %s", message)
 		_, err = stream.Write([]byte(response))
 		if err != nil {
 			log.Printf("Failed to write to stream %d: %v", stream.ID(), err)

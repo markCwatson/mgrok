@@ -24,8 +24,8 @@ const (
 
 // Protocol handshake: 4 bytes "GRT1" + uint8 authMethod + authPayload
 type Handshake struct {
-	Magic      [4]byte // "GRT1"
-	AuthMethod uint8
+	Magic       [4]byte // "GRT1"
+	AuthMethod  uint8
 	AuthPayload []byte
 }
 
@@ -60,12 +60,12 @@ func WriteHandshake(w io.Writer, authMethod uint8, authPayload []byte) error {
 	if _, err := w.Write([]byte("GRT1")); err != nil {
 		return err
 	}
-	
+
 	// Write auth method
 	if _, err := w.Write([]byte{authMethod}); err != nil {
 		return err
 	}
-	
+
 	// Write auth payload
 	_, err := w.Write(authPayload)
 	return err
@@ -77,12 +77,12 @@ func WriteRegister(w io.Writer, proxyType uint8, remotePort, localPort uint16, n
 	if _, err := w.Write([]byte{MsgTypeRegister}); err != nil {
 		return err
 	}
-	
+
 	// Proxy type
 	if _, err := w.Write([]byte{proxyType}); err != nil {
 		return err
 	}
-	
+
 	// Ports
 	portBuf := make([]byte, 4)
 	binary.BigEndian.PutUint16(portBuf, remotePort)
@@ -90,10 +90,8 @@ func WriteRegister(w io.Writer, proxyType uint8, remotePort, localPort uint16, n
 	if _, err := w.Write(portBuf); err != nil {
 		return err
 	}
-	
+
 	// Name
 	_, err := w.Write([]byte(name))
 	return err
 }
-
-// More message encoding/decoding functions would be implemented here 
