@@ -39,7 +39,7 @@ A secure tunnel application for exposing local servers behind NATs and firewalls
 1. **Clone this repository**:
 
    ```bash
-   git clone https://github.com/yourusername/mgrok.git
+   git clone https://github.com/markCwatson/mgrok.git
    cd mgrok
    ```
 
@@ -47,6 +47,9 @@ A secure tunnel application for exposing local servers behind NATs and firewalls
    ```bash
    go mod tidy
    ```
+
+Go stores all dependencies in a central cache, typically at:
+`$GOPATH/pkg/mod/` (usually `~/go/pkg/mod/` on macOS).
 
 ### Building
 
@@ -56,20 +59,10 @@ You can build the project using the provided script:
 ./scripts/build.sh
 ```
 
-This will create the following binaries in the `build` directory:
+This will create the following architecture-specific binaries in the `build` directory:
 
 - `mgrok-server`: The server component
 - `mgrok-client`: The client component
-
-Alternatively, you can build each component manually:
-
-```bash
-# Build server
-go build -o build/mgrok-server ./cmd/server
-
-# Build client
-go build -o build/mgrok-client ./cmd/client
-```
 
 ### Running
 
@@ -108,26 +101,9 @@ For production use, you should enable TLS and proper authentication:
    build/mgrok-client
    ```
 
-## Project Structure
+## Core architecture
 
-```
-mgrok/
-├── cmd/
-│   ├── client/          # Client application
-│   └── server/          # Server application
-├── configs/             # Configuration files
-├── internal/            # Private packages
-│   ├── auth/            # Authentication logic
-│   ├── config/          # Configuration parsing
-│   ├── multiplexer/     # Connection multiplexing
-│   └── tunnel/          # Tunnel implementation
-├── scripts/             # Build and utility scripts
-└── docs/                # Documentation
-```
-
-## 1. Core architecture
-
-1. **Public server**: Listens on a well‑known TCP port (e.g. :7000) for _control tunnels_ from clients. For every service the client wants to expose, it also opens a _public listener_ (TCP or UDP) on demand and forwards traffic through the tunnel. _Go primitives/libs_: `net.Listen`, `net.ListenPacket`; optional TLS (`crypto/tls`).
+1. **Public server**: Listens on a well‑known TCP port (e.g. :9000) for _control tunnels_ from clients. For every service the client wants to expose, it also opens a _public listener_ (TCP or UDP) on demand and forwards traffic through the tunnel. _Go primitives/libs_: `net.Listen`, `net.ListenPacket`; optional TLS (`crypto/tls`).
 
 2. **Client (behind NAT)**: Reads a config file; dials the server with TLS; authenticates; registers one or more _proxies_ (`ssh`, `web`, `udp‑game`, …); keeps the control connection alive; for each incoming stream/packet from the server, opens/uses a local socket and pipes bytes both directions. _Go primitives/libs_: `net.Dial`, goroutines, `io.Copy`; YAML/INI parser.
 
@@ -135,12 +111,18 @@ mgrok/
 
 4. **Reliable‑UDP option** (future): If you want "UDP but reliable, congestion‑controlled" (like frp's `kcp` mode) you can swap the physical link with **kcp‑go**. _Go primitives/libs_: `kcp-go` ([GitHub][3]).
 
----
+## Stages of TCP/UDP Tunneling
 
-## 2. Minimal control protocol (suggestion)
+To read more, see [this doc on tunneling in mgrok][7]. Here is the summary from that doc:
 
-```
-<Handshake>  : 4 bytes "GRT1" + uint8 authMethod + authPayload…
+- Control channel (TCP) carries JSON-framed control messages (NewProxy, StartWorkConn, UDPPacket, Ping, …) multiplexed via a yamux-style transporter.
+- "NewProxy" handshake tells the server which proxy (TCP/UDP/etc.) to open and returns the remoteAddr to listen on.
+- TCP proxy: the server listens on a TCP port and for each incoming connection grabs a workConn to the client; the client connects that workConn to the local service and shuttles bytes.
+- UDP proxy: the server binds a UDP socket and sends/receives each datagram as a base64-encoded msg.UDPPacket over the workConn; on the client side the packet is unwrapped and forwarded to the local UDP service (and vice versa).
+
+## Control protocol (minimal)
+
+```<Handshake> : 4 bytes "GRT1" + uint8 authMethod + authPayload…
 <Register>   : msgType=0x01 | uint8 proxyType | uint16 remotePort | uint16 localPort | N bytes name
 <NewStream>  : msgType=0x02 | uint32 streamID
 <Data>       : msgType=0x03 | uint32 streamID | uint16 length | …bytes…
@@ -150,95 +132,17 @@ mgrok/
 
 _Keep it binary and fixed‑length for speed; frame it with `smux`/`yamux` so you rarely have to re‑invent back‑pressure, windowing, etc._
 
----
-
-## 3. Skeleton flow (Go 1.22+)
-
-```go
-// server/main.go (abridged)
-ln, _ := tls.Listen("tcp", ":7000", tlsCfg())
-for {
-    ctl, _ := ln.Accept()                 // 1. accept client
-    s, _ := smux.Server(ctl, nil)         // 2. wrap in smux
-    go serveClient(s)                     // 3. handle proxies
-}
-
-func serveClient(sess *smux.Session) {
-    ctrlStr, _ := sess.AcceptStream()     // first stream = control
-    go handleControl(ctrlStr, sess)
-}
-
-func handleControl(c net.Conn, sess *smux.Session) {
-    for {
-        msg := readMsg(c)
-        switch msg.Type {
-        case REG_PROXY:
-            go startPublicListener(msg, sess) // TCP or UDP branch
-        }
-    }
-}
-```
-
-```go
-// client/main.go (abridged)
-ctl, _ := tls.Dial("tcp", "server:7000", tlsCfg())
-sess, _ := smux.Client(ctl, nil)
-ctrlStr, _ := sess.OpenStream()          // dedicated control stream
-sendRegisters(ctrlStr, config)
-
-// Goroutine: dispatch every new smux stream.
-go func() {
-    for {
-        s, _ := sess.AcceptStream()      // server ↔ client data stream
-        go pipe(s, localDial(s.ID()))    // io.Copy both ways
-    }
-}()
-```
-
-_In ±300 lines you have a working TCP tunnel; UDP needs one extra mapping table._
-
----
-
-## 4. Handling **UDP**
-
-1. **Server side**
-
-   ```go
-   pc, _ := net.ListenPacket("udp", ":6000")
-   buf := make([]byte, 1500)
-   for {
-       n, rAddr, _ := pc.ReadFrom(buf)
-       stream := getStreamFor(rAddr) // map[ip:port]*smux.Stream
-       stream.Write(frame(buf[:n]))
-   }
-   ```
-
-2. **Client side**
-   Same pattern but reversed: read from the stream, write to local `net.PacketConn`.
-
-3. **State table**
-
-   - Key: remote IP\:port
-   - Value: `*smux.Stream` (or a small struct with timeout)
-   - Clean up with a timer (e.g., 90 s of no packets).
-
-4. **Advanced**: if you later want _reliable_ UDP for the tunnel itself (to avoid TCP‑over‑TCP), just replace the underlying dialer with **kcp-go**—`smux` works fine on top of it. ([Go Packages][4], [Go Packages][5])
-
----
-
-## 5. Security checklist
+## Security checklist
 
 1. **Transport**: Wrap the initial TCP connection in TLS (`crypto/tls`) and disable < TLS 1.2. ([Go Packages][6])
 2. **Authentication**: HMAC‑SHA256 token or mTLS; fail fast on mismatch.
 3. **Authorisation**: Server config lists which client can open which remote ports/domains.
 4. **Hardening**: Rate‑limit registrations; heartbeat every 15 s; close idle sessions; set `TCP_NODELAY` false to let Nagle help small frames.
 
----
-
-## 6. Configuration file (client example)
+## Configuration file (client example)
 
 ```yaml
-server: tunnel.example.com:7000
+server: tunnel.example.com:9000
 token: 92c7…eab
 proxies:
   ssh:
@@ -255,7 +159,7 @@ Parse with `gopkg.in/yaml.v3` and generate the register messages at startup.
 
 ---
 
-## 7. Packaging & DX
+## Packaging & DX
 
 1. **GoReleaser** → multi‑arch binaries + `.deb`/`.rpm`.
 2. Provide a single‑binary server and single‑binary client.
@@ -264,7 +168,7 @@ Parse with `gopkg.in/yaml.v3` and generate the register messages at startup.
 
 ---
 
-## 8. Milestone plan
+## Milestone plan
 
 1. **Week 1**: Basic TCP tunnel (single proxy, no multiplex)
 2. **Week 2**: Replace with `smux` + multiple TCP proxies
@@ -273,13 +177,10 @@ Parse with `gopkg.in/yaml.v3` and generate the register messages at startup.
 5. **Week 5**: TLS + token auth; graceful shutdown
 6. **Week 6**: Packaging (GoReleaser) & docs; test behind real NAT
 
----
-
-### References
-
 [1]: https://github.com/xtaci/smux?utm_source=chatgpt.com 'GitHub - xtaci/smux: A Stream Multiplexing Library for golang with ...'
 [2]: https://github.com/hashicorp/yamux?utm_source=chatgpt.com 'GitHub - hashicorp/yamux: Golang connection multiplexing library'
 [3]: https://github.com/xtaci/kcp-go?utm_source=chatgpt.com 'A Crypto-Secure Reliable-UDP Library for golang with FEC'
 [4]: https://pkg.go.dev/github.com/xtaci/smux?utm_source=chatgpt.com 'smux package - github.com/xtaci/smux - Go Packages'
 [5]: https://pkg.go.dev/github.com/xtaci/kcp-go?utm_source=chatgpt.com 'kcp package - github.com/xtaci/kcp-go - Go Packages'
 [6]: https://pkg.go.dev/crypto/tls?utm_source=chatgpt.com 'tls package - crypto/tls - Go Packages'
+[7]: docs/tunneling.md 'tunneling in mgrok document'

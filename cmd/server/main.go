@@ -30,7 +30,7 @@ func main() {
 		}
 
 		log.Printf("New connection from %s", conn.RemoteAddr())
-		
+
 		// Wrap in smux
 		session, err := smux.Server(conn, nil)
 		if err != nil {
@@ -46,7 +46,7 @@ func main() {
 
 func serveClient(session *smux.Session) {
 	defer session.Close()
-	
+
 	// Accept the control stream
 	ctrlStream, err := session.AcceptStream()
 	if err != nil {
@@ -54,7 +54,7 @@ func serveClient(session *smux.Session) {
 		return
 	}
 	defer ctrlStream.Close()
-	
+
 	// Handle control messages
 	go handleControl(ctrlStream, session)
 
@@ -65,15 +65,15 @@ func serveClient(session *smux.Session) {
 			log.Printf("Error accepting stream: %v", err)
 			return
 		}
-		
+
 		go handleDataStream(stream)
 	}
 }
 
-func handleControl(conn net.Conn, session *smux.Session) {
+func handleControl(conn net.Conn, _ *smux.Session) {
 	// TODO: Implement control protocol
 	log.Println("Control connection established")
-	
+
 	// Just keep the connection alive for now
 	buffer := make([]byte, 1024)
 	for {
@@ -88,20 +88,20 @@ func handleControl(conn net.Conn, session *smux.Session) {
 
 func handleDataStream(stream *smux.Stream) {
 	defer stream.Close()
-	
+
 	log.Printf("New data stream established: %d", stream.ID())
 	buffer := make([]byte, 1024)
-	
+
 	for {
 		n, err := stream.Read(buffer)
 		if err != nil {
 			log.Printf("Stream %d closed: %v", stream.ID(), err)
 			return
 		}
-		
+
 		message := string(buffer[:n])
 		log.Printf("Received on stream %d: %s", stream.ID(), message)
-		
+
 		// Echo back with a prefix
 		response := fmt.Sprintf("Server received: %s", message)
 		_, err = stream.Write([]byte(response))
@@ -110,4 +110,4 @@ func handleDataStream(stream *smux.Stream) {
 			return
 		}
 	}
-} 
+}
