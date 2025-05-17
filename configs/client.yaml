@@ -1,5 +1,5 @@
-server: tunnel.example.com:7000
-token: 92c7e5801fb2be2a0a906938642f3eab
+server: localhost:9000
+token: sample_token
 proxies:
   ssh:
     type: tcp
@@ -13,3 +13,4 @@ proxies:
     type: udp
     local_port: 7777
     remote_port: 7777
+  # Add more proxies as needed

@@ -1,4 +1,4 @@
-module github.com/yourusername/mgrok
+module github.com/markCwatson/mgrok
 
 go 1.22
 

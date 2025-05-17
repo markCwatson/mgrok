@@ -11,19 +11,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/markCwatson/mgrok/internal/client/proxy"
 	"github.com/xtaci/smux"
 	"gopkg.in/yaml.v3"
 )
-
-type Config struct {
-	Server  string `yaml:"server"`
-	Token   string `yaml:"token"`
-	Proxies map[string]struct {
-		Type       string `yaml:"type"`
-		LocalPort  int    `yaml:"local_port"`
-		RemotePort int    `yaml:"remote_port"`
-	} `yaml:"proxies"`
-}
 
 func main() {
 	var err error
@@ -33,7 +24,7 @@ func main() {
 	flag.Parse()
 
 	// Load configuration
-	var config *Config
+	var config *proxy.Config
 	config, err = loadConfig(*configPath)
 	if err != nil {
 		log.Fatalf("Failed to load config: %v", err)
@@ -66,6 +57,9 @@ func main() {
 	}
 	defer session.Close()
 
+	// Create proxy handler
+	proxyHandler := proxy.NewHandler(session, config)
+
 	// Open control stream
 	var ctrlStream *smux.Stream
 	ctrlStream, err = session.OpenStream()
@@ -74,8 +68,8 @@ func main() {
 	}
 	defer ctrlStream.Close()
 
-	// Send proxy registrations
-	registerProxies(ctrlStream, config)
+	// Register proxies
+	proxyHandler.RegisterProxies(ctrlStream)
 
 	// Open a test stream for sending messages
 	var testStream *smux.Stream
@@ -85,24 +79,22 @@ func main() {
 	}
 	defer testStream.Close()
 
-	// Start a goroutine to send test messages
 	go sendTestMessages(testStream)
-	// Start a goroutine to receive responses
 	go receiveResponses(testStream)
 
 	// Set up signal handling for clean shutdown
 	var sigChan chan os.Signal = make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
-	// Accept streams from the server
-	go acceptStreams(session)
+	// Accept and handle streams from the server
+	go acceptStreams(session, proxyHandler)
 
 	// Wait for termination signal
 	<-sigChan
 	log.Println("Shutting down client...")
 }
 
-func loadConfig(path string) (*Config, error) {
+func loadConfig(path string) (*proxy.Config, error) {
 	var data []byte
 	var err error
 	data, err = os.ReadFile(path)
@@ -110,7 +102,7 @@ func loadConfig(path string) (*Config, error) {
 		return nil, fmt.Errorf("failed to read config file: %w", err)
 	}
 
-	var config Config
+	var config proxy.Config
 	if err := yaml.Unmarshal(data, &config); err != nil {
 		return nil, fmt.Errorf("failed to parse config: %w", err)
 	}
@@ -118,13 +110,7 @@ func loadConfig(path string) (*Config, error) {
 	return &config, nil
 }
 
-func registerProxies(_ net.Conn, _ *Config) {
-	// TODO: Implement proxy registration using the protocol defined in the README
-	log.Println("Registering proxies (not yet implemented)")
-	// For each proxy in config.Proxies, register it with the server
-}
-
-func acceptStreams(session *smux.Session) {
+func acceptStreams(session *smux.Session, handler *proxy.Handler) {
 	for {
 		var stream *smux.Stream
 		var err error
@@ -134,23 +120,8 @@ func acceptStreams(session *smux.Session) {
 			return
 		}
 
-		go handleStream(stream)
+		go handler.HandleStream(stream)
 	}
-}
-
-func handleStream(stream *smux.Stream) {
-	defer stream.Close()
-
-	// TODO: Implement stream handling
-	// 1. Determine which local service this stream is for
-	// 2. Connect to that local service
-	// 3. Copy data in both directions
-
-	// This is just a placeholder
-	log.Printf("Received stream %d (not yet handling)", stream.ID())
-
-	// Discard all data from the stream for now
-	io.Copy(io.Discard, stream)
 }
 
 func sendTestMessages(stream *smux.Stream) {

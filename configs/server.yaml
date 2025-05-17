@@ -1,22 +1,19 @@
 # Server configuration
-listen_addr: :7000
-tls:
-  cert_file: certs/server.crt
-  key_file: certs/server.key
+bind_addr: 0.0.0.0
+bind_port: 9000
 
-# Authentication and authorization
-auth:
-  type: token # token or mtls
+# Security settings (disabled for development)
+auth_token: sample_token
+enable_tls: false
 
-# Allowed clients and their permissions
-clients:
-  - token: 92c7e5801fb2be2a0a906938642f3eab
-    name: dev-laptop
-    allowed_ports:
-      - 6000-7000 # Range
-      - 8000 # Single port
-
-  - token: abcdef1234567890abcdef1234567890
-    name: prod-server
-    allowed_ports:
-      - 8000-9000
+# Port range for automatic assignment
+port_range_start: 10000
+port_range_end: 20000
+# Allowed clients (for production use)
+# allowed_clients:
+#   - token: client1_token
+#     name: client1
+#     allowed_ports: [8000, 8001, 8080]
+#   - token: client2_token
+#     name: client2
+#     allowed_ports: [9000-9100]

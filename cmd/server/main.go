@@ -6,8 +6,18 @@ import (
 	"log"
 	"net"
 
+	"github.com/markCwatson/mgrok/internal/server/controller"
+	"github.com/markCwatson/mgrok/internal/server/proxy"
 	"github.com/xtaci/smux"
 )
+
+var proxyManager *proxy.Manager
+var controlHandler *controller.Handler
+
+func init() {
+	proxyManager = proxy.NewManager()
+	controlHandler = controller.NewHandler(proxyManager)
+}
 
 func main() {
 	var err error
@@ -35,7 +45,6 @@ func main() {
 
 		log.Printf("New connection from %s", conn.RemoteAddr())
 
-		// Wrap in smux
 		var session *smux.Session
 		session, err = smux.Server(conn, nil)
 		if err != nil {
@@ -44,7 +53,6 @@ func main() {
 			continue
 		}
 
-		// Handle client in a goroutine
 		go serveClient(session)
 	}
 }
@@ -53,7 +61,11 @@ func serveClient(session *smux.Session) {
 	defer session.Close()
 	var err error
 
-	// Accept the control stream
+	clientID := fmt.Sprintf("%p", session)
+	proxyManager.AddClient(clientID, session)
+
+	defer proxyManager.RemoveClient(clientID)
+
 	var ctrlStream *smux.Stream
 	ctrlStream, err = session.AcceptStream()
 	if err != nil {
@@ -62,8 +74,8 @@ func serveClient(session *smux.Session) {
 	}
 	defer ctrlStream.Close()
 
-	// Handle control messages
-	go handleControl(ctrlStream, session)
+	// Handle control connection
+	go controlHandler.HandleConnection(ctrlStream, session, clientID)
 
 	// Accept and handle other streams
 	for {
@@ -75,22 +87,6 @@ func serveClient(session *smux.Session) {
 		}
 
 		go handleDataStream(stream)
-	}
-}
-
-func handleControl(conn net.Conn, _ *smux.Session) {
-	// TODO: Implement control protocol
-	log.Println("Control connection established")
-
-	// Just keep the connection alive for now
-	buffer := make([]byte, 1024)
-	for {
-		_, err := conn.Read(buffer)
-		if err != nil {
-			log.Printf("Control connection closed: %v", err)
-			break
-		}
-		// Process control messages here
 	}
 }
 
