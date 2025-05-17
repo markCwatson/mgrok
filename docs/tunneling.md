@@ -51,7 +51,7 @@ go controlHandler.HandleConnection(ctrlStream, session, clientID)
 
 ## 2. Proxy registration handshake
 
-The client registers each proxy defined in its configuration by sending registration messages to the server over the control stream.
+The client registers each proxy defined in its configuration (`client.yaml`) by sending registration messages to the server over the control stream.
 
 ### Message format
 
@@ -65,10 +65,8 @@ The client registers each proxy defined in its configuration by sending registra
 ```go
 // internal/client/proxy/handler.go
 func (h *Handler) RegisterProxies(stream *smux.Stream) {
-    // Send handshake
     tunnel.WriteHandshake(stream, tunnel.AuthMethodToken, []byte(h.config.Token))
 
-    // Register each proxy from config
     for name, proxy := range h.config.Proxies {
         tunnel.WriteRegister(
             stream,
@@ -77,7 +75,7 @@ func (h *Handler) RegisterProxies(stream *smux.Stream) {
             uint16(proxy.LocalPort),      // Local service port
             name                          // Proxy identifier
         )
-        // Store the active proxy
+
         h.activeProxies[name] = &Proxy{...}
     }
 }
@@ -90,16 +88,13 @@ The server processes each registration and starts the appropriate listeners:
 ```go
 // internal/server/controller/handler.go
 func (h *Handler) handleRegisterMsg(client *proxy.ClientInfo, data []byte) {
-    // Parse the registration message
     proxyType := data[0]
     remotePort := binary.BigEndian.Uint16(data[1:3])
     localPort := binary.BigEndian.Uint16(data[3:5])
     name := string(data[5:])
 
-    // Register the proxy
     newProxy, err := h.proxyManager.RegisterProxy(client, name, proxyType, remotePort, localPort)
 
-    // For TCP proxies, start TCP listener
     if proxyType == tunnel.ProxyTypeTCP {
         proxy.StartTCPListener(newProxy, client)
     }
@@ -110,7 +105,7 @@ func (h *Handler) handleRegisterMsg(client *proxy.ClientInfo, data []byte) {
 
 ## 3. TCP proxy data path
 
-When a user connects to an exposed port on the server, the server creates a new smux stream to the client and sends information about which proxy was requested.
+When a user connects to an exposed port on the server, the server creates a new smux stream to the client and sends information about which proxy was requested (over port 9000 by default).
 
 ### Server side: incoming connection handling
 
@@ -119,7 +114,6 @@ When a user connects to an exposed port on the server, the server creates a new 
 func acceptConnections(listener net.Listener, client *ClientInfo, proxy *ProxyInfo) {
     for {
         conn, err := listener.Accept()
-        // Handle each incoming connection in a goroutine
         go handleProxyConnection(conn, client, proxy)
     }
 }
