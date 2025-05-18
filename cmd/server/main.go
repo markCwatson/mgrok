@@ -25,18 +25,18 @@ func main() {
 	var port *int = flag.Int("port", 9000, "Port to listen on")
 	flag.Parse()
 
-	var ln net.Listener
-	ln, err = net.Listen("tcp", fmt.Sprintf(":%d", *port))
+	var listener net.Listener
+	listener, err = net.Listen("tcp", fmt.Sprintf(":%d", *port))
 	if err != nil {
 		log.Fatalf("Failed to listen: %v", err)
 	}
-	defer ln.Close()
+	defer listener.Close()
 
 	log.Printf("Server listening on :%d", *port)
 
 	for {
 		var conn net.Conn
-		conn, err = ln.Accept()
+		conn, err = listener.Accept()
 		if err != nil {
 			log.Printf("Failed to accept connection: %v", err)
 			continue
@@ -75,43 +75,7 @@ func serveClient(session *smux.Session) {
 
 	go controlHandler.HandleConnection(ctrlStream, session, clientID)
 
-	for {
-		// handles traffic (one per proxy)
-		var dataStream *smux.Stream
-		dataStream, err = session.AcceptStream()
-		if err != nil {
-			log.Printf("Error accepting data stream: %v", err)
-			return
-		}
-
-		go handleDataStream(dataStream)
-	}
-}
-
-func handleDataStream(stream *smux.Stream) {
-	defer stream.Close()
-	var err error
-
-	log.Printf("New data stream established: %d", stream.ID())
-	var buffer []byte = make([]byte, 1024)
-
-	for {
-		var n int
-		n, err = stream.Read(buffer)
-		if err != nil {
-			log.Printf("Stream %d closed: %v", stream.ID(), err)
-			return
-		}
-
-		var message string = string(buffer[:n])
-		log.Printf("Received on stream %d: %s", stream.ID(), message)
-
-		// Echo back with a prefix
-		var response string = fmt.Sprintf("Server received: %s", message)
-		_, err = stream.Write([]byte(response))
-		if err != nil {
-			log.Printf("Failed to write to stream %d: %v", stream.ID(), err)
-			return
-		}
-	}
+	// Wait for session to be done (connection-level termination)
+	<-session.CloseChan()
+	log.Printf("Client %s disconnected", clientID)
 }
