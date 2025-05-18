@@ -20,6 +20,9 @@ type Handler struct {
 }
 
 // Config represents client configuration
+// The Proxies map in the Config struct defines the client-side proxy
+// configurations that determine which local services will be exposed through the mgrok tunnel.
+// 'yaml:"*"' are struct tags that tell the yaml package how to map the yaml file to the struct using yaml.Unmarshal()
 type Config struct {
 	Server  string `yaml:"server"`
 	Token   string `yaml:"token"`

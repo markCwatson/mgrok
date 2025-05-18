@@ -2,33 +2,32 @@
 
 A secure tunnel application for exposing local servers behind NATs and firewalls to the internet.
 
+## Features planed
+
+1. Basic TCP tunnel ✅
+2. TCP tunnel with `smux` + multiple TCP proxies ✅
+3. YAML config ✅
+4. Add UDP forwarding
+5. Reconnect logic + heartbeats
+6. TLS + token auth; graceful shutdown
+7. Packaging (GoReleaser) & docs; test behind real NAT
+
 ## Getting Started
 
 ### Prerequisites
 
 #### Installing Go on macOS
 
-1. **Install Homebrew** (if not already installed):
-
-   ```bash
-   /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-   ```
-
-2. **Install Go**:
+1. **Install Go**:
 
    ```bash
    brew install go
-   ```
-
-3. **Verify installation**:
-
-   ```bash
    go version
    ```
 
    You should see something like `go version go1.24.3 darwin/arm64`
 
-4. **Set up GOPATH** (add to your ~/.zshrc or ~/.bash_profile):
+2. **Set up GOPATH** (add to your ~/.zshrc or ~/.bash_profile):
    ```bash
    export GOPATH=$HOME/go
    export PATH=$PATH:$GOPATH/bin
@@ -36,15 +35,11 @@ A secure tunnel application for exposing local servers behind NATs and firewalls
 
 ### Setup Project
 
-1. **Clone this repository**:
+1. **Clone this repository and install dependencies**:
 
    ```bash
    git clone https://github.com/markCwatson/mgrok.git
    cd mgrok
-   ```
-
-2. **Install dependencies**:
-   ```bash
    go mod tidy
    ```
 
@@ -141,21 +136,7 @@ The tunnel's success is visible through the logs and the actual data transfer wo
 
 #### Production Setup
 
-For production use, you should enable TLS and proper authentication:
-
-1. **Configure the server** by editing `configs/server.yaml`
-2. **Generate TLS certificates** and place them in the `certs/` directory
-3. **Run the server**:
-
-   ```bash
-   build/mgrok-server
-   ```
-
-4. **Configure the client** by editing `configs/client.yaml` with your server's domain
-5. **Run the client**:
-   ```bash
-   build/mgrok-client
-   ```
+Not really sure yet 🤔
 
 ## Core architecture
 
@@ -185,53 +166,6 @@ To read more, see [this doc on tunneling in mgrok][7]. Here is the summary from 
 <Close>      : msgType=0x04 | uint32 streamID
 <Heartbeat>  : msgType=0x05
 ```
-
-_Keep it binary and fixed‑length for speed; frame it with `smux`/`yamux` so you rarely have to re‑invent back‑pressure, windowing, etc._
-
-## Security checklist
-
-1. **Transport**: Wrap the initial TCP connection in TLS (`crypto/tls`) and disable < TLS 1.2. ([Go Packages][6])
-2. **Authentication**: HMAC‑SHA256 token or mTLS; fail fast on mismatch.
-3. **Authorisation**: Server config lists which client can open which remote ports/domains.
-4. **Hardening**: Rate‑limit registrations; heartbeat every 15 s; close idle sessions; set `TCP_NODELAY` false to let Nagle help small frames.
-
-## Configuration file (client example)
-
-```yaml
-server: tunnel.example.com:9000
-token: 92c7…eab
-proxies:
-  ssh:
-    type: tcp
-    local_port: 22
-    remote_port: 6000
-  game:
-    type: udp
-    local_port: 7777
-    remote_port: 7777
-```
-
-Parse with `gopkg.in/yaml.v3` and generate the register messages at startup.
-
----
-
-## Packaging & DX
-
-1. **GoReleaser** → multi‑arch binaries + `.deb`/`.rpm`.
-2. Provide a single‑binary server and single‑binary client.
-3. Systemd unit examples (`After=network.target; Restart=always`).
-4. Optional: Docker images (`scratch` or `alpine`).
-
----
-
-## Milestone plan
-
-1. **Week 1**: Basic TCP tunnel (single proxy, no multiplex)
-2. **Week 2**: Replace with `smux` + multiple TCP proxies
-3. **Week 3**: Add UDP forwarding (stateless map)
-4. **Week 4**: YAML config + reconnect logic + heartbeats
-5. **Week 5**: TLS + token auth; graceful shutdown
-6. **Week 6**: Packaging (GoReleaser) & docs; test behind real NAT
 
 [1]: https://github.com/xtaci/smux?utm_source=chatgpt.com 'GitHub - xtaci/smux: A Stream Multiplexing Library for golang with ...'
 [2]: https://github.com/hashicorp/yamux?utm_source=chatgpt.com 'GitHub - hashicorp/yamux: Golang connection multiplexing library'

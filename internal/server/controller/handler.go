@@ -94,7 +94,6 @@ func (h *Handler) HandleConnection(ctrlStream *smux.Stream, session *smux.Sessio
 
 // handleRegisterMsg handles a register message
 func (h *Handler) handleRegisterMsg(client *proxy.ClientInfo, data []byte) {
-	// Debug the raw message
 	log.Printf("Register message received (%d bytes): [% x]", len(data), data)
 
 	if len(data) < 5 { // proxyType(1) + remotePort(2) + localPort(2) + at least 1 byte name
@@ -110,7 +109,6 @@ func (h *Handler) handleRegisterMsg(client *proxy.ClientInfo, data []byte) {
 	log.Printf("Parsed registration request: %s, type=%d, remote_port=%d, local_port=%d",
 		name, proxyType, remotePort, localPort)
 
-	// Register proxy
 	newProxy, err := h.proxyManager.RegisterProxy(client, name, proxyType, remotePort, localPort)
 	if err != nil {
 		log.Printf("Failed to register proxy: %v", err)
