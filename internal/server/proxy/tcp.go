@@ -66,7 +66,6 @@ func handleProxyConnection(conn net.Conn, client *ClientInfo, proxy *ProxyInfo) 
 	}
 	defer stream.Close()
 
-	// Send NewStream message with proxy identifier
 	streamID := stream.ID()
 
 	// Format:
@@ -78,23 +77,12 @@ func handleProxyConnection(conn net.Conn, client *ClientInfo, proxy *ProxyInfo) 
 
 	nameBytes := []byte(proxy.Name)
 	nameLen := len(nameBytes)
-
-	// Allocate buffer for the entire message
 	msgBuf := make([]byte, 8+nameLen)
 
-	// 1. Message type
 	msgBuf[0] = tunnel.MsgTypeNewStream
-
-	// 2. Stream ID (4 bytes)
 	binary.BigEndian.PutUint32(msgBuf[1:5], streamID)
-
-	// 3. Remote port (2 bytes)
 	binary.BigEndian.PutUint16(msgBuf[5:7], proxy.RemotePort)
-
-	// 4. Name length (1 byte)
 	msgBuf[7] = byte(nameLen)
-
-	// 5. Proxy name (variable)
 	if nameLen > 0 {
 		copy(msgBuf[8:], nameBytes)
 	}
@@ -103,17 +91,23 @@ func handleProxyConnection(conn net.Conn, client *ClientInfo, proxy *ProxyInfo) 
 		proxy.Name, proxy.RemotePort, streamID)
 
 	// Send the complete message in one write
+	// The message is sent to the client, which will then connect to the local service.
 	_, err = stream.Write(msgBuf)
 	if err != nil {
 		log.Printf("Failed to send NewStream message: %v", err)
 		return
 	}
 
-	// Now copy data in both directions
+	// Now copy data in both directions:
+	//  This creates a complete bidirectional pipe between the incoming connection and
+	//  the client-side service, which is the essence of the tunneling functionality.
+
 	go func() {
+		// conn/server -> stream/client
 		_, _ = io.Copy(stream, conn)
 		stream.Close()
 	}()
 
+	// stream/client -> conn/server
 	_, _ = io.Copy(conn, stream)
 }
