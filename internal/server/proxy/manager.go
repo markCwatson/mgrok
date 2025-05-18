@@ -125,3 +125,17 @@ func (m *Manager) RegisterProxy(client *ClientInfo, name string, proxyType uint8
 	log.Printf("Registered proxy %s on port %d", name, remotePort)
 	return proxy, nil
 }
+
+// closes all proxy TCP listeners
+func (m *Manager) CloseAllListeners() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	for _, client := range m.clients {
+		for _, proxy := range client.Proxies {
+			if proxy.Listener != nil {
+				proxy.Listener.Close()
+			}
+		}
+	}
+}
