@@ -1,6 +1,8 @@
 # mgrok
 
-A secure tunnel application for exposing local servers behind NATs and firewalls to the internet.
+A tunneling application for exposing local servers behind NATs and firewalls to the internet. In the demo below, the mgrok server (top-left) and client (top-right) are running concurrently. A local web server on port 8080 (bottom-left) hosts a simple HTML page; then, from the bottom-right tab I 'curl' the mgrok server’s public port 8000. The request is forwarded over the tunnel to the client, which fetches the page from localhost:8080 and sends it back through the server to 'curl'.
+
+![alt-text][8]
 
 ## Features planed
 
@@ -8,10 +10,7 @@ A secure tunnel application for exposing local servers behind NATs and firewalls
 2. TCP tunnel with `smux` + multiple TCP proxies ✅
 3. YAML config ✅
 4. TLS support ✅
-5. Auth
-6. Add UDP forwarding
-7. Reconnect logic + heartbeats
-8. Packaging (GoReleaser) & docs; test behind real NAT
+5. Simple Auth ✅
 
 ## Getting Started
 
@@ -183,3 +182,4 @@ To read more, see [this doc on tunneling in mgrok][7]. Here is the summary from 
 [5]: https://pkg.go.dev/github.com/xtaci/kcp-go?utm_source=chatgpt.com 'kcp package - github.com/xtaci/kcp-go - Go Packages'
 [6]: https://pkg.go.dev/crypto/tls?utm_source=chatgpt.com 'tls package - crypto/tls - Go Packages'
 [7]: docs/tunneling.md 'tunneling in mgrok document'
+[8]: assets/mgrok-demo-1.gif 'An mgrok demo'
