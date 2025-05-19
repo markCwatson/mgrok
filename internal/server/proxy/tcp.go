@@ -49,7 +49,6 @@ func acceptConnections(listener net.Listener, client *ClientInfo, proxy *ProxyIn
 
 		log.Printf("New connection for proxy %s from %s", proxy.Name, conn.RemoteAddr())
 
-		// Handle the connection in a goroutine
 		go handleProxyConnection(conn, client, proxy)
 	}
 }

@@ -1,10 +1,14 @@
+# TLS certificate and key paths
+enable_tls: true
+tls_cert_file: ~/repos/mgrok/certs/localhost+2.pem
+tls_key_file: ~/repos/mgrok/certs/localhost+2-key.pem
+
 # Server configuration
-bind_addr: 0.0.0.0
+bind_addr: 127.0.0.1
 bind_port: 9000
 
 # Security settings (disabled for development)
 auth_token: sample_token
-enable_tls: false
 
 # Port range for automatic assignment
 port_range_start: 10000

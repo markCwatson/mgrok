@@ -1,12 +1,14 @@
 package main
 
 import (
+	"crypto/tls"
 	"flag"
 	"fmt"
 	"log"
 	"net"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/markCwatson/mgrok/internal/client/proxy"
@@ -35,11 +37,17 @@ func main() {
 		config.Server = "localhost:9000"
 	}
 
-	log.Printf("Connecting to server at %s", config.Server)
+	log.Printf("Connecting to server at %s using TLS", config.Server)
 	var conn net.Conn
-	conn, err = net.Dial("tcp", config.Server)
+	conn, err = tls.Dial("tcp", config.Server, &tls.Config{
+		ServerName: strings.Split(config.Server, ":")[0],
+	})
 	if err != nil {
-		log.Fatalf("Failed to connect to server: %v", err)
+		log.Printf("Failed to connect to server using TLS. Will try plain TCP.")
+		conn, err = net.Dial("tcp", config.Server)
+		if err != nil {
+			log.Fatalf("Failed to connect to server using plain TCP: %v", err)
+		}
 	}
 	defer conn.Close()
 

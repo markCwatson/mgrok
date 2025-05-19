@@ -10,13 +10,17 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/markCwatson/mgrok/internal/config"
 	"github.com/markCwatson/mgrok/internal/server/controller"
 	"github.com/markCwatson/mgrok/internal/server/proxy"
+	"github.com/markCwatson/mgrok/internal/server/tls"
 	"github.com/xtaci/smux"
 )
 
+var tlsManager *tls.Manager
 var proxyManager *proxy.Manager
 var controlHandler *controller.Handler
+var cfg *config.ServerConfig
 
 func init() {
 	proxyManager = proxy.NewManager()
@@ -27,10 +31,17 @@ func main() {
 	var err error
 
 	var port *int = flag.Int("port", 9000, "Port to listen on")
+	var configFile *string = flag.String("config", "configs/server.yaml", "Path to config file")
 	flag.Parse()
 
+	cfg, err = config.LoadServerConfig(*configFile)
+	if err != nil {
+		log.Fatalf("Failed to load configuration: %v", err)
+	}
+
 	var listener net.Listener
-	listener, err = net.Listen("tcp", fmt.Sprintf(":%d", *port))
+	tlsManager = tls.NewManager(cfg)
+	listener, err = tlsManager.Listen(fmt.Sprintf(":%d", *port))
 	if err != nil {
 		log.Fatalf("Failed to listen: %v", err)
 	}

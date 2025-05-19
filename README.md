@@ -7,10 +7,11 @@ A secure tunnel application for exposing local servers behind NATs and firewalls
 1. Basic TCP tunnel ✅
 2. TCP tunnel with `smux` + multiple TCP proxies ✅
 3. YAML config ✅
-4. Add UDP forwarding
-5. Reconnect logic + heartbeats
-6. TLS + token auth; graceful shutdown
-7. Packaging (GoReleaser) & docs; test behind real NAT
+4. TLS support ✅
+5. Auth
+6. Add UDP forwarding
+7. Reconnect logic + heartbeats
+8. Packaging (GoReleaser) & docs; test behind real NAT
 
 ## Getting Started
 
@@ -63,76 +64,84 @@ This will create the following architecture-specific binaries in the `build` dir
 
 #### Development Setup (Quick Start)
 
-For local development and testing, TLS is disabled by default to simplify setup:
+TLS must be setup and configured (the following instructions were tested on Mac).
 
-1. **Start a local service** - Run something on your local port like a web server (can use `mgrok/web` directory):
+1. **Install mkcert** - We'll use `mkcert` to handle the TLS certificate.
 
    ```
-   cd ./web
-   python -m http.server 8080
+   brew install mkcert nss
    ```
 
-2. **Configure your proxies** - The `configs/client.yaml` file defines which local services to expose:
+2. **Install a local Certificate Authority** - Bootstrap a local CA and add it to your trust store.
+
+   ```
+   mkcert -install
+   ```
+
+3. **Generate a cert for localhost** -Generate the `.pem` files in `mgrok/certs/` then return to the root of this repo.
+
+   ```
+   cd certs
+   mkcert localhost 127.0.0.1 ::1
+   cd -
+   ```
+
+4. **Configure mgrk server** - Update the `configs/server.yaml` file with your files/paths.
+
+   ```yaml
+   enable_tls: true
+   tls_cert_file: ~/repos/mgrok/certs/localhost+2.pem
+   tls_key_file: ~/repos/mgrok/certs/localhost+2-key.pem
+   bind_addr: 127.0.0.1
+   bind_port: 9000
+   ```
+
+5. **Start a local service** - For testing, run the web server (configured for https) in the `web/` directory.
+
+   ```
+   python web/server.py
+   ```
+
+6. **Configure your proxies** - The `configs/client.yaml` file defines which local services to expose. Configure it for the web proxy.
 
    ```yaml
    server: localhost:9000
    token: sample_token
    proxies:
-     ssh:
-       type: tcp
-       local_port: 22
-       remote_port: 6000
      web:
        type: tcp
        local_port: 8080
        remote_port: 8000
-     game:
-       type: udp
-       local_port: 7777
-       remote_port: 7777
    ```
 
-   This configures three tunnels simultaneously:
-
-   - SSH server (port 22) → exposed at port 6000
-   - Web server (port 8080) → exposed at port 8000
-   - UDP game server (port 7777) → exposed at port 7777
-
-3. **Start your server and client**:
+7. **Start your server and client**:
 
    ```
    ./build/mgrok-server
    ./build/mgrok-client
    ```
 
-4. **Verify proxy registration** - The client will register all proxies defined in the config:
+8. **Verify proxy registration** - The client will register all proxies defined in the config. You should see
 
    ```
-   Registered proxy ssh: tcp port 22 -> 6000
    Registered proxy web: tcp port 8080 -> 8000
-   Registered proxy game: udp port 7777 -> 7777
    ```
 
-5. **Test the tunnel** - Connect to any exposed port on your server:
+9. **Test the tunnel** - Connect to the exposed port on your mgrok server using TLS.
 
    ```
-   curl localhost:8000     # Access your web server
-   ssh localhost -p 6000   # Connect to your SSH server (if running)
+   curl https://localhost:8000
    ```
 
-6. **Observe the logs**:
-   - Server: "New connection for proxy web from 127.0.0.1:xxxxx"
-   - Client: "Connecting to local service at localhost:8080"
-   - Client: Stream opened and closed when the connection completes
-
-This test shows:
+You should see the text html page returned. This test shows:
 
 1. A user connects to the exposed server port
 2. Server creates a data stream to client
 3. Client identifies which proxy was requested and connects to the corresponding local service
 4. Data is copied bidirectionally through the multiplexed tunnel
+5. TLS support
 
-The tunnel's success is visible through the logs and the actual data transfer working correctly.
+Note: you can disable TLS by setting `enable_tls: false` in `configs/server.yaml` (the client will fallback to TCP if the TLS handshake fails).
 
 #### Production Setup
 
