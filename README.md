@@ -175,10 +175,6 @@ auth_token: 0196e9bd-dab3-7d51-a89c-4fcc68e3a811
 token: 0196e9bd-dab3-7d51-a89c-4fcc68e3a811
 ```
 
-#### Production Setup
-
-Not really sure yet 🤔
-
 ## Core architecture
 
 1. **Public server**: Listens on a well‑known TCP port (e.g. :9000) for _control tunnels_ from clients. For every service the client wants to expose, it also opens a _public listener_ (TCP or UDP) on demand and forwards traffic through the tunnel. _Go primitives/libs_: `net.Listen`, `net.ListenPacket`; optional TLS (`crypto/tls`).
