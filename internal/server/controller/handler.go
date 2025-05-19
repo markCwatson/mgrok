@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"log"
 
+	"github.com/markCwatson/mgrok/internal/config"
 	"github.com/markCwatson/mgrok/internal/server/proxy"
 	"github.com/markCwatson/mgrok/internal/tunnel"
 	"github.com/xtaci/smux"
@@ -13,12 +14,14 @@ import (
 // Handler handles control connections
 type Handler struct {
 	proxyManager *proxy.Manager
+	serverConfig *config.ServerConfig
 }
 
 // NewHandler creates a new control handler
-func NewHandler(proxyManager *proxy.Manager) *Handler {
+func NewHandler(proxyManager *proxy.Manager, serverConfig *config.ServerConfig) *Handler {
 	return &Handler{
 		proxyManager: proxyManager,
+		serverConfig: serverConfig,
 	}
 }
 
@@ -42,8 +45,11 @@ func (h *Handler) HandleConnection(ctrlStream *smux.Stream, session *smux.Sessio
 		return
 	}
 
-	// Debug the exact bytes received
-	log.Printf("Handshake received (%d bytes): [% x]", n, buffer[:n])
+	if n > 5 {
+		log.Printf("Handshake received (%d bytes): [% x] + auth payload (%d bytes)", 5, buffer[:5], n-5)
+	} else {
+		log.Printf("Handshake received (%d bytes): [% x]", n, buffer[:n])
+	}
 
 	// Check magic bytes - must be exactly "GRT1"
 	magicBytes := []byte("GRT1")
@@ -55,9 +61,28 @@ func (h *Handler) HandleConnection(ctrlStream *smux.Stream, session *smux.Sessio
 	authMethod := buffer[4]
 	log.Printf("Client using auth method: %d", authMethod)
 
-	// Process auth payload (for token this would be the token string)
-	if n > 5 {
-		log.Printf("Auth payload: %s", string(buffer[5:n]))
+	if authMethod == tunnel.AuthMethodToken {
+		if h.serverConfig.AuthToken == "" {
+			log.Printf("Server auth token not configured, authentication failed")
+			return
+		}
+
+		if n <= 5 {
+			log.Printf("Authentication failed: No auth token provided")
+			return
+		}
+
+		clientAuthToken := string(buffer[5:n])
+
+		if clientAuthToken != h.serverConfig.AuthToken {
+			log.Printf("Authentication failed: Invalid auth token")
+			return
+		}
+
+		log.Printf("Authentication successful")
+	} else {
+		log.Printf("Unsupported auth method: %d", authMethod)
+		return
 	}
 
 	// Process control messages

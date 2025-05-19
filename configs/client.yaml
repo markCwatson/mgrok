@@ -1,5 +1,5 @@
 server: localhost:9000
-token: sample_token
+token: 0196e9bd-dab3-7d51-a89c-4fcc68e3a811
 proxies:
   ssh:
     type: tcp
@@ -9,8 +9,3 @@ proxies:
     type: tcp
     local_port: 8080
     remote_port: 8000
-  game:
-    type: udp
-    local_port: 7777
-    remote_port: 7777
-  # Add more proxies as needed

@@ -74,8 +74,11 @@ func WriteHandshake(w io.Writer, authMethod uint8, authPayload []byte) error {
 	handshake := append([]byte("GRT1"), authMethod)
 	handshake = append(handshake, authPayload...)
 
-	// Log what we're sending
-	log.Printf("Sending handshake (%d bytes): [% x]", len(handshake), handshake)
+	if len(authPayload) > 0 {
+		log.Printf("Sending handshake: [% x] + auth payload (%d bytes)", append([]byte("GRT1"), authMethod), len(authPayload))
+	} else {
+		log.Printf("Sending handshake: [% x]", handshake)
+	}
 
 	// Write the full handshake in one call to ensure atomic write
 	_, err := w.Write(handshake)
@@ -88,25 +91,16 @@ func WriteHandshake(w io.Writer, authMethod uint8, authPayload []byte) error {
 
 // WriteRegister writes a register message to any io.Writer (such as a control stream)
 func WriteRegister(w io.Writer, proxyType uint8, remotePort, localPort uint16, name string) error {
-	// Create a buffer to build the message
 	msgBuf := make([]byte, 0, 10+len(name))
 
-	// Message type
 	msgBuf = append(msgBuf, MsgTypeRegister)
-
-	// Proxy type
 	msgBuf = append(msgBuf, proxyType)
-
-	// Add remote port (2 bytes, big endian)
 	portBuf := make([]byte, 4)
 	binary.BigEndian.PutUint16(portBuf, remotePort)
 	binary.BigEndian.PutUint16(portBuf[2:], localPort)
 	msgBuf = append(msgBuf, portBuf...)
-
-	// Name (remainder of message)
 	msgBuf = append(msgBuf, []byte(name)...)
 
-	// Log what we're sending
 	log.Printf("Sending register message (%d bytes): [% x]", len(msgBuf), msgBuf)
 	log.Printf("Register details: type=%d, remote=%d, local=%d, name=%s",
 		proxyType, remotePort, localPort, name)

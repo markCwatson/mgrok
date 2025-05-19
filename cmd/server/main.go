@@ -24,7 +24,6 @@ var cfg *config.ServerConfig
 
 func init() {
 	proxyManager = proxy.NewManager()
-	controlHandler = controller.NewHandler(proxyManager)
 }
 
 func main() {
@@ -38,6 +37,8 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to load configuration: %v", err)
 	}
+
+	controlHandler = controller.NewHandler(proxyManager, cfg)
 
 	var listener net.Listener
 	tlsManager = tls.NewManager(cfg)

@@ -1,11 +1,10 @@
-## TCP/UDP tunneling in mgrok
+## TCP tunneling in mgrok
 
-Below is a high-level walkthrough of how mgrok implements both TCP and UDP tunneling. It is broken down into four stages:
+Below is a high-level walkthrough of how mgrok implements TCP tunneling. It is broken down into four stages:
 
 1. Control connection & multiplexing
 2. Proxy registration
 3. TCP proxy data path
-4. UDP proxy data path (future implementation)
 
 ---
 
@@ -159,22 +158,6 @@ func (h *Handler) handleNewStream(stream *smux.Stream) {
     go io.Copy(stream, localConn)  // local → server
     io.Copy(localConn, stream)     // server → local
 }
-```
-
----
-
-## 4. UDP proxy data path (Future Implementation)
-
-UDP support is currently defined in the protocol but not fully implemented. The plan is to handle UDP by:
-
-1. Server binding a UDP socket for each UDP proxy
-2. Encapsulating UDP datagrams as messages over the multiplexed TCP connection
-3. Client unpacking these datagrams and forwarding to the local UDP service
-
-The UDP message format will be:
-
-```
-<UDPPacket> : msgType | sourceAddr | destinationAddr | uint16 length | payload
 ```
 
 ---
