@@ -1,6 +1,6 @@
 # mgrok
 
-A tunneling application for exposing local servers behind NATs and firewalls to the internet. In the demo below, the mgrok server (top-left) and client (top-right) are running concurrently. A local web server on port 8080 (bottom-left) hosts a simple HTML page; then, from the bottom-right tab I 'curl' the mgrok server’s public port 8000. The request is forwarded over the tunnel to the client, which fetches the page from localhost:8080 and sends it back through the server to 'curl'.
+A tunneling application for exposing local servers behind NATs and firewalls to the internet. In the demo below, the mgrok server (top-left) and client (top-right) are running concurrently. A local web server on port 8080 (bottom-left) hosts a simple HTML page; then, from the bottom-right tab I 'curl' the mgrok server's public port 8000. The request is forwarded over the tunnel to the client, which fetches the page from localhost:8080 and sends it back through the server to 'curl'.
 
 ![alt-text][8]
 
@@ -93,6 +93,7 @@ TLS must be setup and configured (the following instructions were tested on Mac)
    tls_key_file: ~/repos/mgrok/certs/localhost+2-key.pem
    bind_addr: 127.0.0.1
    bind_port: 9000
+   auth_token: your-secret-token-here
    ```
 
 5. **Start a local service** - For testing, run the web server (configured for https) in the `web/` directory.
@@ -105,7 +106,7 @@ TLS must be setup and configured (the following instructions were tested on Mac)
 
    ```yaml
    server: localhost:9000
-   token: sample_token
+   token: your-secret-token-here
    proxies:
      web:
        type: tcp
@@ -141,6 +142,38 @@ You should see the text html page returned. This test shows:
 5. TLS support
 
 Note: you can disable TLS by setting `enable_tls: false` in `configs/server.yaml` (the client will fallback to TCP if the TLS handshake fails).
+
+### Authentication
+
+mgrok uses a simple token-based authentication to secure connections between the client and server:
+
+1. **Token Configuration**:
+
+   - Server: Set the `auth_token` field in `configs/server.yaml`
+   - Client: Set the `token` field in `configs/client.yaml`
+   - Both tokens must match exactly for authentication to succeed
+
+2. **How it works**:
+
+   - During handshake, the client sends its token to the server
+   - The server validates this token against its configured auth_token
+   - If they match, the connection is authenticated and allowed to proceed
+   - If they don't match, the server rejects the connection
+
+3. **Security**:
+   - Keep your token values private and secure
+   - Use a strong, unique token (UUID or random string)
+   - The token is kept private and not logged in plaintext
+
+Example tokens in config files:
+
+```yaml
+# Server (configs/server.yaml)
+auth_token: 0196e9bd-dab3-7d51-a89c-4fcc68e3a811
+
+# Client (configs/client.yaml)
+token: 0196e9bd-dab3-7d51-a89c-4fcc68e3a811
+```
 
 #### Production Setup
 
