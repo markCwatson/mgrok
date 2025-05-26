@@ -2,7 +2,7 @@
 
 [![Build](https://github.com/markCwatson/mgrok/actions/workflows/go-build.yml/badge.svg)](https://github.com/markCwatson/mgrok/actions/workflows/go-build.yml)
 
-A tunneling application for exposing local servers behind NATs and firewalls to the internet. In the demo below, the mgrok server (top-left) and client (top-right) are running concurrently. A local web server on port 8080 (bottom-left) hosts a simple HTML page; then, from the bottom-right tab I 'curl' the mgrok server's public port 8000. The request is forwarded over the tunnel to the client, which fetches the page from localhost:8080 and sends it back through the server to 'curl'.
+A tunneling application for exposing local services behind NATs and firewalls to the internet. In the demo below, the mgrok server (top-left) and client (top-right) are running concurrently. A local web server on port 8080 (bottom-left) hosts a simple HTML page; then, from the bottom-right tab I 'curl' the mgrok server's public port 8000. The request is forwarded over the tunnel to the client, which fetches the page from localhost:8080 and sends it back through the server to 'curl'.
 
 ![alt-text][8]
 
