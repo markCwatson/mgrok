@@ -43,6 +43,11 @@ The protocol supports two proxy types:
 - TCP (0x01): Standard TCP connection forwarding
 - UDP (0x02): Datagram forwarding via encapsulation
 
+For UDP proxies each datagram is wrapped with a 2 byte length header on the
+multiplexed stream. The server forwards packets it receives on the public UDP
+socket to the client over this stream and the client does the same in the
+opposite direction.
+
 ## Flow
 
 1. Client connects to server and establishes a session

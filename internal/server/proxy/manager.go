@@ -16,6 +16,7 @@ type ProxyInfo struct {
 	RemotePort uint16
 	Name       string
 	Listener   net.Listener // Only used for TCP proxies
+	UDPConn    *net.UDPConn // Only used for UDP proxies
 }
 
 // ClientInfo stores information about a connected client
@@ -72,6 +73,9 @@ func (m *Manager) RemoveClient(clientID string) {
 	for _, proxy := range client.Proxies {
 		if proxy.Listener != nil {
 			proxy.Listener.Close()
+		}
+		if proxy.UDPConn != nil {
+			proxy.UDPConn.Close()
 		}
 		delete(m.portToProxy, proxy.RemotePort)
 	}
@@ -135,6 +139,9 @@ func (m *Manager) CloseAllListeners() {
 		for _, proxy := range client.Proxies {
 			if proxy.Listener != nil {
 				proxy.Listener.Close()
+			}
+			if proxy.UDPConn != nil {
+				proxy.UDPConn.Close()
 			}
 		}
 	}

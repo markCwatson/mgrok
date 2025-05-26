@@ -172,3 +172,11 @@ func (h *Handler) handleNewStream(stream *smux.Stream) {
 - The client matches this information to connect to the correct local service
 
 This approach allows many services to be exposed through a single connection, with minimal overhead and maximum efficiency.
+
+### UDP support
+
+UDP proxies follow the same registration flow but the server binds a `UDPConn`
+instead of a TCP listener. Each datagram read from the public socket is sent to
+the client over a new multiplexed stream with a 2 byte length prefix. The client
+sends any responses back on the same stream. This keeps UDP traffic connection
+less while still using the reliable TCP tunnel.
