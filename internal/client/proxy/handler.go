@@ -171,11 +171,13 @@ func (h *Handler) handleNewStream(stream *smux.Stream) {
 	// Find the matching local port for this proxy
 	var localPort int
 	var proxyFound bool
+	var proxyType string
 
 	// First try to find by name
 	if proxyName != "" {
 		if proxy, exists := h.config.Proxies[proxyName]; exists {
 			localPort = proxy.LocalPort
+			proxyType = proxy.Type
 			proxyFound = true
 			log.Printf("Found proxy by name: %s -> localhost:%d", proxyName, localPort)
 		}
@@ -186,6 +188,7 @@ func (h *Handler) handleNewStream(stream *smux.Stream) {
 		for _, proxy := range h.config.Proxies {
 			if proxy.RemotePort == int(remotePort) {
 				localPort = proxy.LocalPort
+				proxyType = proxy.Type
 				proxyFound = true
 				log.Printf("Found proxy by port: %d -> localhost:%d", remotePort, localPort)
 				break
@@ -204,41 +207,101 @@ func (h *Handler) handleNewStream(stream *smux.Stream) {
 		log.Printf("Warning: Could not find matching proxy, using first available")
 		for _, proxy := range h.config.Proxies {
 			localPort = proxy.LocalPort
+			proxyType = proxy.Type
 			break
 		}
 	}
 
-	// Connect to the local service
 	localAddr := fmt.Sprintf("localhost:%d", localPort)
-	log.Printf("Connecting to local service at %s for stream %d", localAddr, streamID)
+	log.Printf("Connecting to local %s service at %s for stream %d", proxyType, localAddr, streamID)
 
-	localConn, err := net.Dial("tcp", localAddr)
-	if err != nil {
-		log.Printf("Failed to connect to local service at %s: %v", localAddr, err)
-		stream.Close()
-		return
-	}
-	defer localConn.Close()
+	if proxyType == "udp" {
+		udpAddr, err := net.ResolveUDPAddr("udp", localAddr)
+		if err != nil {
+			log.Printf("Failed to resolve UDP address %s: %v", localAddr, err)
+			stream.Close()
+			return
+		}
+		udpConn, err := net.DialUDP("udp", nil, udpAddr)
+		if err != nil {
+			log.Printf("Failed to dial UDP %s: %v", localAddr, err)
+			stream.Close()
+			return
+		}
+		defer udpConn.Close()
 
-	// Set up bidirectional copy
-	errCh := make(chan error, 2)
+		errCh := make(chan error, 2)
 
-	// Copy from local service to remote
-	go func() {
-		_, err := io.Copy(stream, localConn)
-		errCh <- err
-	}()
+		go func() {
+			buf := make([]byte, 65535)
+			for {
+				n, err := udpConn.Read(buf)
+				if err != nil {
+					errCh <- err
+					return
+				}
+				lenBuf := make([]byte, 2)
+				binary.BigEndian.PutUint16(lenBuf, uint16(n))
+				if _, err := stream.Write(lenBuf); err != nil {
+					errCh <- err
+					return
+				}
+				if _, err := stream.Write(buf[:n]); err != nil {
+					errCh <- err
+					return
+				}
+			}
+		}()
 
-	// Copy from remote to local service
-	go func() {
-		_, err := io.Copy(localConn, stream)
-		errCh <- err
-	}()
+		go func() {
+			for {
+				lenBuf := make([]byte, 2)
+				if _, err := io.ReadFull(stream, lenBuf); err != nil {
+					errCh <- err
+					return
+				}
+				l := binary.BigEndian.Uint16(lenBuf)
+				data := make([]byte, l)
+				if _, err := io.ReadFull(stream, data); err != nil {
+					errCh <- err
+					return
+				}
+				if _, err := udpConn.Write(data); err != nil {
+					errCh <- err
+					return
+				}
+			}
+		}()
 
-	// Wait for either copy to finish
-	err = <-errCh
-	if err != nil && err != io.EOF {
-		log.Printf("Error in data forwarding: %v", err)
+		err = <-errCh
+		if err != nil && err != io.EOF {
+			log.Printf("UDP forwarding error: %v", err)
+		}
+	} else {
+		localConn, err := net.Dial("tcp", localAddr)
+		if err != nil {
+			log.Printf("Failed to connect to local service at %s: %v", localAddr, err)
+			stream.Close()
+			return
+		}
+		defer localConn.Close()
+
+		errCh := make(chan error, 2)
+
+		go func() {
+			_, err := io.Copy(stream, localConn)
+			errCh <- err
+		}()
+
+		go func() {
+			_, err := io.Copy(localConn, stream)
+			errCh <- err
+		}()
+
+		err = <-errCh
+		if err != nil && err != io.EOF {
+			log.Printf("Error in data forwarding: %v", err)
+		}
 	}
 
 	log.Printf("Stream %d closed", streamID)
