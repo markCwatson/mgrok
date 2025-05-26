@@ -141,12 +141,17 @@ func (h *Handler) handleRegisterMsg(client *proxy.ClientInfo, data []byte) {
 		return
 	}
 
-	// For TCP proxies, start a listener
-	if proxyType == tunnel.ProxyTypeTCP {
+	switch proxyType {
+	case tunnel.ProxyTypeTCP:
 		err = proxy.StartTCPListener(newProxy, client)
 		if err != nil {
 			log.Printf("Failed to start TCP listener: %v", err)
-			// TODO: Send back error response
+			return
+		}
+	case tunnel.ProxyTypeUDP:
+		err = proxy.StartUDPListener(newProxy, client)
+		if err != nil {
+			log.Printf("Failed to start UDP listener: %v", err)
 			return
 		}
 	}

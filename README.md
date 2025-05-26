@@ -13,6 +13,7 @@ A tunneling application for exposing local servers behind NATs and firewalls to 
 3. YAML config ✅
 4. TLS support ✅
 5. Simple Auth ✅
+6. UDP tunnel (experimental) ✅
 
 ## Getting Started
 
@@ -144,6 +145,43 @@ You should see the text html page returned. This test shows:
 5. TLS support
 
 Note: you can disable TLS by setting `enable_tls: false` in `configs/server.yaml` (the client will fallback to TCP if the TLS handshake fails).
+
+### Testing UDP Tunneling
+
+To test UDP forwarding you can expose a local UDP echo server. First add a UDP
+proxy to `configs/client.yaml`:
+
+```yaml
+proxies:
+  echo:
+    type: udp
+    local_port: 9001 # local UDP service
+    remote_port: 7000 # exposed on the server
+```
+
+Start a simple echo service on the client machine. Using `netcat`, I could only
+process a single datagram even with `-k`, so using a small Python script is a
+reliable way to keep the UDP service running (it will echo it back over tunnel):
+
+```bash
+python3 - <<'EOF'
+import socket
+s=socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+s.bind(("localhost", 9001))
+while True:
+    d, a = s.recvfrom(4096)
+    s.sendto(d, a)
+EOF
+```
+
+Run the mgrok server and client as shown above. Then send a datagram to the
+server's exposed port and you should see it echoed back:
+
+```bash
+echo "hello" | nc -u -w1 localhost 7000
+```
+
+This confirms that UDP packets are transported through the tunnel.
 
 ### Authentication
 
