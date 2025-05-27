@@ -216,6 +216,7 @@ func (h *Handler) handleNewStream(stream *smux.Stream) {
 	log.Printf("Connecting to local %s service at %s for stream %d", proxyType, localAddr, streamID)
 
 	if proxyType == "udp" {
+		// udp
 		udpAddr, err := net.ResolveUDPAddr("udp", localAddr)
 		if err != nil {
 			log.Printf("Failed to resolve UDP address %s: %v", localAddr, err)
@@ -232,6 +233,8 @@ func (h *Handler) handleNewStream(stream *smux.Stream) {
 
 		errCh := make(chan error, 2)
 
+		// bidirectional UDP forwarding
+		// to local udp service
 		go func() {
 			buf := make([]byte, 65535)
 			for {
@@ -253,6 +256,7 @@ func (h *Handler) handleNewStream(stream *smux.Stream) {
 			}
 		}()
 
+		// to server on udp port
 		go func() {
 			for {
 				lenBuf := make([]byte, 2)
@@ -278,6 +282,7 @@ func (h *Handler) handleNewStream(stream *smux.Stream) {
 			log.Printf("UDP forwarding error: %v", err)
 		}
 	} else {
+		// tcp
 		localConn, err := net.Dial("tcp", localAddr)
 		if err != nil {
 			log.Printf("Failed to connect to local service at %s: %v", localAddr, err)
@@ -288,11 +293,15 @@ func (h *Handler) handleNewStream(stream *smux.Stream) {
 
 		errCh := make(chan error, 2)
 
+		// bidirectional tcp forwarding
+
+		// to local tcp service
 		go func() {
 			_, err := io.Copy(stream, localConn)
 			errCh <- err
 		}()
 
+		// to server on tcp port
 		go func() {
 			_, err := io.Copy(localConn, stream)
 			errCh <- err

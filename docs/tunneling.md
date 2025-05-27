@@ -180,3 +180,5 @@ instead of a TCP listener. Each datagram read from the public socket is sent to
 the client over a new multiplexed stream with a 2 byte length prefix. The client
 sends any responses back on the same stream. This keeps UDP traffic connection
 less while still using the reliable TCP tunnel.
+
+The length prefixing is necessary because the tunnel uses a TCP-like stream, but UDP is packet-based. The length prefix ensures packet boundaries are preserved when transmitting UDP data over the stream-based tunnel connection.

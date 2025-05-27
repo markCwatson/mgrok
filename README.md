@@ -2,7 +2,7 @@
 
 [![Build](https://github.com/markCwatson/mgrok/actions/workflows/go-build.yml/badge.svg)](https://github.com/markCwatson/mgrok/actions/workflows/go-build.yml)
 
-Expose local services behind NATs and firewalls to the internet over TLS encrypted TCP and/or UDP tunnels! mgrok uses a TLS-encrypted TCP connection for the tunnel itself, and then forwards either TCP or UDP traffic through that secure tunnel to your local services.
+Expose local services behind NATs and firewalls to the internet over TLS encrypted TCP and/or UDP tunnels! mgrok uses a TLS-encrypted TCP connection for the tunnel itself, and then forwards either TCP or UDP traffic through that secure tunnel to your local services. mgrok is inspired by [ngrok][9] and [frp][10].
 
 In the demo below, the mgrok server (top-left) and client (top-right) are running concurrently. A local web server on port 8080 (bottom-left) hosts a simple HTML page; then, from the bottom-right tab I 'curl' the mgrok server's public port 8000. The request is forwarded over the tunnel to the client, which fetches the page from localhost:8080 and sends it back through the server to 'curl'.
 
@@ -246,11 +246,13 @@ To read more, see [this doc on tunneling in mgrok][7]. Here is the summary from 
 <Heartbeat>  : msgType=0x05
 ```
 
-[1]: https://github.com/xtaci/smux?utm_source=chatgpt.com 'GitHub - xtaci/smux: A Stream Multiplexing Library for golang with ...'
-[2]: https://github.com/hashicorp/yamux?utm_source=chatgpt.com 'GitHub - hashicorp/yamux: Golang connection multiplexing library'
-[3]: https://github.com/xtaci/kcp-go?utm_source=chatgpt.com 'A Crypto-Secure Reliable-UDP Library for golang with FEC'
-[4]: https://pkg.go.dev/github.com/xtaci/smux?utm_source=chatgpt.com 'smux package - github.com/xtaci/smux - Go Packages'
-[5]: https://pkg.go.dev/github.com/xtaci/kcp-go?utm_source=chatgpt.com 'kcp package - github.com/xtaci/kcp-go - Go Packages'
-[6]: https://pkg.go.dev/crypto/tls?utm_source=chatgpt.com 'tls package - crypto/tls - Go Packages'
+[1]: https://github.com/xtaci/smux 'GitHub - xtaci/smux: A Stream Multiplexing Library for golang with ...'
+[2]: https://github.com/hashicorp/yamux 'GitHub - hashicorp/yamux: Golang connection multiplexing library'
+[3]: https://github.com/xtaci/kcp-go 'A Crypto-Secure Reliable-UDP Library for golang with FEC'
+[4]: https://pkg.go.dev/github.com/xtaci/smux 'smux package - github.com/xtaci/smux - Go Packages'
+[5]: https://pkg.go.dev/github.com/xtaci/kcp-go 'kcp package - github.com/xtaci/kcp-go - Go Packages'
+[6]: https://pkg.go.dev/crypto/tls 'tls package - crypto/tls - Go Packages'
 [7]: docs/tunneling.md 'tunneling in mgrok document'
 [8]: assets/mgrok-demo-1.gif 'An mgrok demo'
+[9]: https://github.com/ngrok 'ngrok'
+[10]: https://github.com/fatedier/frp 'frp'
